@@ -1,0 +1,102 @@
+name: Release
+
+# Build a multi-arch image, push it to GHCR, then commit the new tag back into
+# k8s/kustomization.yaml so Flux (registered in homelab-ci/manifests/flux-sources)
+# rolls it out automatically.
+#
+# The bot's commit-back doesn't re-trigger this workflow because pushes signed
+# by the default GITHUB_TOKEN don't fan out, and paths-ignore covers us if the
+# auth model ever changes.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'k8s/kustomization.yaml'
+      - '**.md'
+      - '.github/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/bryanneva/dingdong
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          set -euo pipefail
+          short="main-$(echo "${{ github.sha }}" | cut -c1-7)"
+          {
+            echo "short=${short}"
+            echo "list<<EOF"
+            echo "${IMAGE}:main"
+            echo "${IMAGE}:${short}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.tags.outputs.list }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Bump kustomize image tag
+        env:
+          SHORT: ${{ steps.tags.outputs.short }}
+        run: |
+          set -euo pipefail
+          # yq is preinstalled on ubuntu-latest runners (mikefarah variant).
+          yq -i '
+            (.images[] | select(.name == "ghcr.io/bryanneva/dingdong") | .newTag) = strenv(SHORT)
+          ' k8s/kustomization.yaml
+          git diff --stat k8s/kustomization.yaml || true
+
+      - name: Commit and push tag bump
+        env:
+          SHORT: ${{ steps.tags.outputs.short }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet k8s/kustomization.yaml; then
+            echo "kustomization.yaml unchanged — nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add k8s/kustomization.yaml
+          git commit -m "chore(deploy): bump image to ${SHORT}
+
+[skip ci]"
+          git push origin HEAD:main

@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Namespace is created by manifests/namespaces in homelab-ci to keep
+# bootstrap/teardown ordered with the rest of the cluster. We only own the
+# workloads that live inside it.
+
+resources:
+  - dingdong-secret.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+# Image tag is rewritten on every push to main by .github/workflows/release.yml.
+# Don't hand-edit this block — CI does `kustomize edit set image` and commits
+# the result back. See README "Deploy" for the loop.
+images:
+  - name: ghcr.io/bryanneva/dingdong
+    newTag: bootstrap

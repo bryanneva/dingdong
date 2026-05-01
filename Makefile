@@ -21,12 +21,14 @@ run: build
 image:
 	docker build -t $(IMAGE):$(TAG) .
 
-push: image
+# Production deploys go through .github/workflows/release.yml + Flux. This
+# target is for emergency manual pushes only — CI is the canonical writer.
+push-emergency: image
 	docker push $(IMAGE):$(TAG)
 
-deploy:
-	kubectl apply -f deploy/k8s/namespace.yaml
-	kubectl apply -f deploy/k8s/
+# Render manifests as Flux would — useful when iterating on k8s/
+render:
+	kubectl kustomize k8s
 
 clean:
 	rm -rf bin/

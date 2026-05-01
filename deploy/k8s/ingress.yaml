@@ -1,0 +1,36 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dingdong
+  namespace: dingdong
+  annotations:
+    cert-manager.io/cluster-issuer: local-ca-issuer
+    # SSE / long-lived streams: disable Traefik buffering and bump timeouts
+    traefik.ingress.kubernetes.io/router.middlewares: dingdong-sse-headers@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - dingdong.neva.home.arpa
+      secretName: dingdong-tls
+  rules:
+    - host: dingdong.neva.home.arpa
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dingdong
+                port:
+                  number: 80
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sse-headers
+  namespace: dingdong
+spec:
+  headers:
+    customResponseHeaders:
+      X-Accel-Buffering: "no"

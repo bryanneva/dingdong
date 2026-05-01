@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dingdong</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0e0f12;
+        --panel: #181a20;
+        --border: #2a2d36;
+        --text: #e6e8ee;
+        --muted: #9aa2b1;
+        --accent: #ffb84d;
+        --kind-knock: #ffb84d;
+        --kind-ready: #6ddf7e;
+        --kind-need: #ff7d7d;
+        --kind-info: #7db6ff;
+        --kind-reply: #c79dff;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: var(--bg); color: var(--text);
+        display: flex; flex-direction: column;
+      }
+      header {
+        display: flex; align-items: center; gap: 12px;
+        padding: 10px 16px; border-bottom: 1px solid var(--border);
+        background: var(--panel);
+      }
+      header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+      header .dot {
+        display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+        background: var(--muted);
+      }
+      header .dot.live { background: var(--kind-ready); box-shadow: 0 0 6px var(--kind-ready); }
+      header input[type="text"] {
+        padding: 6px 10px; border-radius: 6px;
+        border: 1px solid var(--border); background: #0b0c10; color: var(--text);
+        font: inherit; min-width: 200px;
+      }
+      header label { color: var(--muted); font-size: 12px; }
+      header button {
+        padding: 6px 10px; border-radius: 6px;
+        border: 1px solid var(--border); background: #0b0c10; color: var(--text);
+        cursor: pointer; font: inherit;
+      }
+      header button:hover { border-color: var(--accent); color: var(--accent); }
+      main {
+        flex: 1; overflow: auto; padding: 12px 16px;
+        display: flex; flex-direction: column; gap: 8px;
+      }
+      .knock {
+        padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+        background: var(--panel); display: grid;
+        grid-template-columns: auto 1fr auto; gap: 6px 12px; align-items: baseline;
+      }
+      .knock .kind {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+        padding: 2px 6px; border-radius: 4px; background: #0b0c10;
+        border: 1px solid currentColor;
+      }
+      .kind-knock { color: var(--kind-knock); }
+      .kind-ready { color: var(--kind-ready); }
+      .kind-need  { color: var(--kind-need); }
+      .kind-info  { color: var(--kind-info); }
+      .kind-reply { color: var(--kind-reply); }
+      .knock .from { color: var(--muted); font-size: 12px; }
+      .knock .from .arrow { margin: 0 4px; }
+      .knock .ts { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+      .knock .subject { grid-column: 1 / -1; font-weight: 600; }
+      .knock .body {
+        grid-column: 1 / -1; color: var(--muted);
+        white-space: pre-wrap; font-size: 13px;
+      }
+      .empty { color: var(--muted); padding: 24px; text-align: center; }
+      .auth-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+        display: flex; align-items: center; justify-content: center;
+      }
+      .auth-overlay form {
+        background: var(--panel); padding: 24px; border-radius: 10px;
+        border: 1px solid var(--border); display: grid; gap: 12px; min-width: 320px;
+      }
+      .auth-overlay h2 { margin: 0; font-size: 16px; }
+      .auth-overlay input {
+        padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border);
+        background: #0b0c10; color: var(--text); font: inherit;
+      }
+      .auth-overlay button {
+        padding: 8px 12px; border-radius: 6px; border: 1px solid var(--accent);
+        background: transparent; color: var(--accent); cursor: pointer; font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="dot" id="status-dot" title="disconnected"></span>
+      <h1>dingdong</h1>
+      <label for="topic">topic</label>
+      <input id="topic" type="text" placeholder="(all topics)" />
+      <label for="to">to</label>
+      <input id="to" type="text" placeholder="(any recipient)" />
+      <button id="clear">clear</button>
+      <button id="logout">forget token</button>
+    </header>
+    <main id="feed"><div class="empty">connecting…</div></main>
+    <div class="auth-overlay" id="auth-overlay" hidden>
+      <form id="auth-form">
+        <h2>enter dingdong token</h2>
+        <input id="token-input" type="password" autocomplete="off" placeholder="DINGDONG_TOKEN" />
+        <button type="submit">connect</button>
+      </form>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

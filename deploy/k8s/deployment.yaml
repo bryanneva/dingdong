@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dingdong
+  namespace: dingdong
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # in-memory state; rolling update would split traffic across two empty buffers
+  selector:
+    matchLabels:
+      app: dingdong
+  template:
+    metadata:
+      labels:
+        app: dingdong
+    spec:
+      containers:
+        - name: dingdong
+          image: ghcr.io/bryanneva/dingdong:dev
+          imagePullPolicy: IfNotPresent
+          args: ["--addr=:8080", "--capacity=1000"]
+          env:
+            - name: DINGDONG_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dingdong-token
+                  key: token
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

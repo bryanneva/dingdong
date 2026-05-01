@@ -45,9 +45,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /v1/knocks", s.requireAuth(http.HandlerFunc(s.handleListKnocks)))
 	s.mux.Handle("GET /v1/stream", s.requireAuth(http.HandlerFunc(s.handleStream)))
 
+	// Static assets are served unauthenticated so the browser can load the HTML
+	// + JS that prompts for a token. The bytes themselves contain no secrets;
+	// the JS gates everything by attaching the token to /v1/* requests.
 	static, err := fs.Sub(ui.Static, "static")
 	if err != nil {
 		panic(err)
 	}
-	s.mux.Handle("GET /", s.requireAuth(http.FileServer(http.FS(static))))
+	s.mux.Handle("GET /", http.FileServer(http.FS(static)))
 }

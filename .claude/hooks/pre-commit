@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# Real git pre-commit hook. Installed by `make install-hooks`. Mirrors what
-# the Claude Code PreToolUse hook in .claude/settings.json does, so the same
-# scan runs whether the commit is driven by Claude or by direct CLI use.
-exec "$(git rev-parse --show-toplevel)/.claude/scripts/check-public-safe.sh" commit

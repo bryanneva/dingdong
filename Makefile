@@ -1,7 +1,7 @@
 IMAGE ?= ghcr.io/bryanneva/dingdong
 TAG   ?= dev
 
-.PHONY: build cli test vet run image push deploy clean verify-fresh-clone install-hooks
+.PHONY: build cli test vet run image push deploy clean verify-fresh-clone
 
 build:
 	go build -o bin/dingdong .
@@ -53,19 +53,6 @@ verify-fresh-clone:
 	  exit 1; \
 	fi; \
 	echo "OK: fresh clone has all source dirs and $$go_files .go files."
-
-# Symlink the public-safety scanner into .git/hooks so it runs on every
-# commit/push, including ones driven by direct CLI use (not just Claude). The
-# .claude/settings.json hook is the redundant Claude-side belt; this is the
-# git-side suspenders. Per-clone (`.git/hooks/` is not in version control), so
-# rerun on a fresh clone.
-install-hooks:
-	@hooks_dir="$$(git rev-parse --git-path hooks)"; \
-	root="$$(git rev-parse --show-toplevel)"; \
-	for h in pre-commit pre-push; do \
-	  ln -sf "$$root/.claude/hooks/$$h" "$$hooks_dir/$$h"; \
-	  echo "linked $$hooks_dir/$$h → .claude/hooks/$$h"; \
-	done
 
 clean:
 	rm -rf bin/

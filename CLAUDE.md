@@ -76,6 +76,45 @@ Secret is supplied by the `OnePasswordItem` in `k8s/dingdong-secret.yaml`
 For local iteration on the deployment manifests, use `make render` to see the
 hydrated YAML Flux would apply.
 
+## Machine-Network Safety
+
+Cluster-internal IPs (OrbStack VM bridge, k3s pod/service CIDR — typically
+`192.168.139.0/24`, `10.42.0.0/16`, `10.43.0.0/16`) are not routable from
+clients on a different host or subnet. User-facing docs, topic files, and
+bootstrap instructions must reference one of:
+
+- The DNS hostname: `dingdong.neva.home.arpa` (TLS via local-ca-issuer)
+- The host LAN IP (the Mac Studio's address on `192.168.1.0/24`)
+- The Tailscale IP (works from anywhere on the tailnet)
+
+Before documenting a URL or `/etc/hosts` entry for cross-machine bootstrap,
+probe from a machine on a different subnet:
+
+```sh
+dig +short dingdong.neva.home.arpa     # should return a LAN IP, not 192.168.139.x
+curl -sf https://dingdong.neva.home.arpa/healthz
+```
+
+Caught by the cross-machine bootstrap dogfood (2026-05-01) — an
+OrbStack-internal IP shipped in the bootstrap topic and broke the MBA's
+clone on `192.168.1.0/24`. See dotfiles#62 for the topic-file fix.
+
+## Shipping Gate
+
+Before declaring any work "repo-shipped" (merged and ready for cross-machine use):
+
+1. **`make verify-fresh-clone`** — temp-clones this repo into `/tmp` and verifies
+   `cmd/`, `cmd/dingdong-cli/`, `internal/server/`, `internal/ui/static/` are all
+   present. Required after any `.gitignore` change or new `cmd/` subdirectory.
+   Catches the PR #6 class of bug where an unanchored `.gitignore` pattern
+   silently filters source on fresh checkout.
+2. **CI green on the merge commit** — `gh run list --branch main --limit 3`
+   before pointing another machine at the repo.
+3. **For UI changes** (`internal/ui/static/**`): open the deployed page in a
+   real browser and exercise the user-visible flow. PR #5 (auth-overlay
+   `display: flex` overriding UA `[hidden]`) shipped because curl-only validation
+   doesn't catch CSS specificity bugs.
+
 ## What the MVP deliberately leaves out
 
 See the plan at `~/.claude/plans/i-want-to-make-twinkly-hoare.md`. Short list:

@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash(git push*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); for dir in cmd cmd/dingdong-cli internal internal/server internal/ui internal/ui/static; do if [ -d \"$root/$dir\" ]; then ignored=$(git -C \"$root\" check-ignore -v \"$dir/\" 2>/dev/null); if [ -n \"$ignored\" ]; then echo \"BLOCKED: source dir is matched by .gitignore: $ignored\" >&2; echo \"  Anchor binary patterns with leading slash (e.g. /dingdong-cli not dingdong-cli)\" >&2; echo \"  Run: make verify-fresh-clone   to confirm sources are tracked.\" >&2; exit 2; fi; fi; done; exit 0'",
+            "timeout": 10,
+            "statusMessage": "Checking source dirs not silently gitignored..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(gh pr merge*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'input=$(cat); cmd=$(printf %s \"$input\" | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get(\\\"input\\\",{}).get(\\\"command\\\",\\\"\\\"))\" 2>/dev/null); pr=$(printf %s \"$cmd\" | grep -oE \"[0-9]+\" | head -1); if [ -n \"$pr\" ]; then ui=$(gh pr diff \"$pr\" --name-only 2>/dev/null | grep -E \"^internal/ui/static/\" | head -1); if [ -n \"$ui\" ]; then echo \"WARNING: PR #$pr touches internal/ui/static/ — verify in a real browser before merging.\" >&2; echo \"  curl-only validation does not catch CSS specificity bugs (PR #5: auth-overlay).\" >&2; echo \"  See CLAUDE.md § Shipping Gate.\" >&2; fi; fi; exit 0'",
+            "timeout": 15,
+            "statusMessage": "Checking if PR touches UI..."
+          }
+        ]
+      }
+    ]
+  }
+}

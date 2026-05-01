@@ -73,25 +73,73 @@ Auth: `Authorization: Bearer <DINGDONG_TOKEN>` on every endpoint, or
 
 ## Deploy
 
-Mirror the `homelab-ci/manifests/homepage` pattern: namespace + deployment +
-service + ingress + secret. The provided manifests put the service at
-`https://dingdong.neva.home.arpa` with `local-ca-issuer`.
+The pipeline lives in this repo; the cluster registration lives in
+[`bryanneva/homelab-ci`](https://github.com/bryanneva/homelab-ci).
 
-```sh
-# 1. Build & push your image (set IMAGE/TAG as needed)
-make image push IMAGE=ghcr.io/bryanneva/dingdong TAG=v0.1.0
-# update deploy/k8s/deployment.yaml image: line to match
-
-# 2. Generate a token + create the secret
-cp deploy/k8s/secret.example.yaml deploy/k8s/secret.yaml
-sed -i '' "s|REPLACE_ME|$(openssl rand -hex 32)|" deploy/k8s/secret.yaml
-
-# 3. Apply
-make deploy
+```
+push to main                          watches via GitRepository
+   │                                       │
+   ▼                                       ▼
+.github/workflows/release.yml        homelab-ci/manifests/flux-sources/
+  ├─ go vet/build/test                  dingdong.yaml
+  ├─ docker buildx push ghcr.io           │
+  └─ kustomize edit + commit ──┐          ▼
+                               ▼     Flux Kustomization
+                       k8s/kustomization.yaml ────► applies k8s/ to cluster
 ```
 
-The token is also what you'll set in `DINGDONG_TOKEN` on every machine that
-runs the CLI.
+**Steady state**: merge to `main` → image built and pushed → CI commits the
+new tag into `k8s/kustomization.yaml` → Flux picks up the change within ~1
+minute and rolls out a new pod. There is no manual deploy step.
+
+### One-time setup
+
+1. **GHCR image visibility** — first push to `ghcr.io/bryanneva/dingdong`
+   creates a private package. Flip it to public on GitHub
+   (`Packages → dingdong → Package settings → Change visibility → Public`),
+   or add an `imagePullSecret` to `k8s/deployment.yaml`. The image is just a
+   Go binary, so public is fine.
+
+2. **Token in 1Password** — create a vault item at
+   `Homelab/dingdong` with a single field `token`:
+   ```sh
+   op item create --category=password --vault=Homelab --title=dingdong \
+     "token[password]=$(openssl rand -hex 32)"
+   ```
+   The `OnePasswordItem` in `k8s/dingdong-secret.yaml` syncs it into the
+   cluster as the `dingdong-token` Secret.
+
+3. **Flux deploy key** — Flux clones this private repo over SSH:
+   ```sh
+   ssh-keygen -t ed25519 -N "" -f /tmp/flux-dingdong -C flux-dingdong
+   gh repo deploy-key add /tmp/flux-dingdong.pub --repo bryanneva/dingdong --title flux-read
+   kubectl create secret generic flux-dingdong \
+     --namespace=flux-system \
+     --from-file=identity=/tmp/flux-dingdong \
+     --from-file=identity.pub=/tmp/flux-dingdong.pub \
+     --from-literal=known_hosts="$(ssh-keyscan github.com 2>/dev/null)"
+   shred -u /tmp/flux-dingdong /tmp/flux-dingdong.pub
+   ```
+
+4. **Register with homelab-ci** — add `manifests/namespaces/dingdong.yaml`
+   and `manifests/flux-sources/dingdong.yaml` mirroring the open-brain
+   pattern. (PR for this is opened separately when this repo's deploy
+   pipeline lands.)
+
+After all four are in place, every push to `main` triggers a hands-off rollout.
+
+### Local image build
+
+`make image` still builds a single-arch image locally for testing. CI is the
+only writer for `ghcr.io` tags and `k8s/kustomization.yaml`.
+
+### Rollback
+
+Revert the bot's `chore(deploy): bump image to main-…` commit and push;
+Flux will redeploy the previous image tag. Or `kubectl set image
+deployment/dingdong dingdong=ghcr.io/bryanneva/dingdong:<old>` for an
+emergency override (Flux will reconcile back to whatever's in git within
+a minute, so `git revert` is the durable path).
 
 ## Conventions worth adopting
 

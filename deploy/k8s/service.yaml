@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dingdong
+  namespace: dingdong
+spec:
+  selector:
+    app: dingdong
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

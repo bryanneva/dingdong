@@ -1,0 +1,22 @@
+# Binaries
+/bin/
+dingdong
+dingdong-cli
+
+# Local secrets — never commit
+deploy/k8s/secret.yaml
+.env
+.env.local
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+
+# Harness session state (not source)
+.context/
+
+# Go cruft
+*.test
+*.out
+coverage.txt

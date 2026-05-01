@@ -1,7 +1,9 @@
-# Binaries
+# Binaries (anchored to repo root — `dingdong-cli` without the leading slash
+# also matched the cmd/dingdong-cli/ source directory, which is the bug that
+# kept the CLI from ever being pushed).
 /bin/
-dingdong
-dingdong-cli
+/dingdong
+/dingdong-cli
 
 # Local secrets — never commit
 deploy/k8s/secret.yaml

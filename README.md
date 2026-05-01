@@ -14,11 +14,10 @@ ConfigMap.
 - A single Go binary serving an HTTP API + SSE stream + a one-page web UI
 - A `dingdong` CLI for agents (`knock`, `wait`, `tail`)
 - Single shared bearer token, in-memory ring buffer (last 1000 knocks)
-- One k8s namespace with one Deployment + Ingress at `dingdong.neva.home.arpa`
+- One k8s namespace with one Deployment + Ingress
 
 Out of scope for the MVP: persistence, per-agent identity/ACLs, MCP server,
-multi-replica HA, mobile push. See `~/.claude/plans/i-want-to-make-twinkly-hoare.md`
-for the full plan.
+multi-replica HA, mobile push.
 
 ## Quickstart (local)
 
@@ -30,11 +29,11 @@ DINGDONG_TOKEN=localdev go run .
 export DINGDONG_URL=http://localhost:8080
 export DINGDONG_TOKEN=localdev
 
-go run ./cmd/dingdong-cli knock --from "mbp:claude" --topic hosts-fix \
-    --kind ready --subject "studio app listening on 192.168.1.5:8080"
+go run ./cmd/dingdong-cli knock --from "laptop:claude" --topic demo \
+    --kind ready --subject "hello from laptop"
 
-go run ./cmd/dingdong-cli wait --topic hosts-fix --timeout 5m
-go run ./cmd/dingdong-cli tail --topic hosts-fix
+go run ./cmd/dingdong-cli wait --topic demo --timeout 5m
+go run ./cmd/dingdong-cli tail --topic demo
 ```
 
 Open http://localhost:8080, paste the token, and you'll see a live feed.
@@ -45,9 +44,9 @@ Open http://localhost:8080, paste the token, and you'll see a live feed.
 {
   "id": "...",                 // server-assigned, sortable
   "ts": "...",                 // server-assigned, RFC3339
-  "from": "mbp:claude:hosts-fix",
-  "to":   "studio:claude",     // optional; empty = broadcast
-  "topic": "hosts-fix",
+  "from": "laptop:claude:demo",
+  "to":   "desktop:claude",    // optional; empty = broadcast
+  "topic": "demo",
   "kind":  "knock|ready|need|info|reply",
   "subject": "short headline",
   "body": "longer body, markdown ok",
@@ -73,19 +72,19 @@ Auth: `Authorization: Bearer <DINGDONG_TOKEN>` on every endpoint, or
 
 ## Deploy
 
-The pipeline lives in this repo; the cluster registration lives in
-[`bryanneva/homelab-ci`](https://github.com/bryanneva/homelab-ci).
+The manifests in `k8s/` are an example layout for a homelab k3s cluster using
+Flux + the 1Password operator. You will need to adapt them for your own
+cluster — the hostname, cert-issuer, and secret source are all environment-
+specific.
 
 ```
 push to main                          watches via GitRepository
    │                                       │
    ▼                                       ▼
-.github/workflows/release.yml        homelab-ci/manifests/flux-sources/
-  ├─ go vet/build/test                  dingdong.yaml
-  ├─ docker buildx push ghcr.io           │
-  └─ kustomize edit + commit ──┐          ▼
-                               ▼     Flux Kustomization
-                       k8s/kustomization.yaml ────► applies k8s/ to cluster
+.github/workflows/release.yml        cluster GitOps (Flux/ArgoCD/etc.)
+  ├─ go vet/build/test                  │
+  ├─ docker buildx push ghcr.io         ▼
+  └─ kustomize edit + commit ──► k8s/kustomization.yaml ─► applies k8s/
 ```
 
 **Steady state**: merge to `main` → image built and pushed → CI commits the
@@ -94,39 +93,24 @@ minute and rolls out a new pod. There is no manual deploy step.
 
 ### One-time setup
 
-1. **GHCR image visibility** — first push to `ghcr.io/bryanneva/dingdong`
+1. **GHCR image visibility** — first push to `ghcr.io/<your-org>/dingdong`
    creates a private package. Flip it to public on GitHub
    (`Packages → dingdong → Package settings → Change visibility → Public`),
    or add an `imagePullSecret` to `k8s/deployment.yaml`. The image is just a
    Go binary, so public is fine.
 
-2. **Token in 1Password** — create a vault item at
-   `Homelab/dingdong` with a single field `token`:
-   ```sh
-   op item create --category=password --vault=Homelab --title=dingdong \
-     "token[password]=$(openssl rand -hex 32)"
-   ```
-   The `OnePasswordItem` in `k8s/dingdong-secret.yaml` syncs it into the
-   cluster as the `dingdong-token` Secret.
+2. **Token secret** — generate a token (`openssl rand -hex 32`) and put it in
+   a `Secret` named `dingdong-token` with key `token` in the `dingdong`
+   namespace. The reference example uses the 1Password operator
+   (`k8s/dingdong-secret.yaml`); replace it with whatever fits your cluster
+   (sealed-secrets, external-secrets, plain `kubectl create secret`, etc.).
 
-3. **Flux deploy key** — Flux clones this private repo over SSH:
-   ```sh
-   ssh-keygen -t ed25519 -N "" -f /tmp/flux-dingdong -C flux-dingdong
-   gh repo deploy-key add /tmp/flux-dingdong.pub --repo bryanneva/dingdong --title flux-read
-   kubectl create secret generic flux-dingdong \
-     --namespace=flux-system \
-     --from-file=identity=/tmp/flux-dingdong \
-     --from-file=identity.pub=/tmp/flux-dingdong.pub \
-     --from-literal=known_hosts="$(ssh-keyscan github.com 2>/dev/null)"
-   shred -u /tmp/flux-dingdong /tmp/flux-dingdong.pub
-   ```
+3. **GitOps source** — point your GitOps controller (Flux, ArgoCD, …) at
+   `k8s/` in this repo. The `kustomization.yaml` `images:` block is rewritten
+   by CI on every push to `main`.
 
-4. **Register with homelab-ci** — add `manifests/namespaces/dingdong.yaml`
-   and `manifests/flux-sources/dingdong.yaml` mirroring the open-brain
-   pattern. (PR for this is opened separately when this repo's deploy
-   pipeline lands.)
-
-After all four are in place, every push to `main` triggers a hands-off rollout.
+After all three are in place, every push to `main` triggers a hands-off
+rollout.
 
 ### Local image build
 
@@ -136,14 +120,14 @@ only writer for `ghcr.io` tags and `k8s/kustomization.yaml`.
 ### Rollback
 
 Revert the bot's `chore(deploy): bump image to main-…` commit and push;
-Flux will redeploy the previous image tag. Or `kubectl set image
-deployment/dingdong dingdong=ghcr.io/bryanneva/dingdong:<old>` for an
-emergency override (Flux will reconcile back to whatever's in git within
-a minute, so `git revert` is the durable path).
+your GitOps controller will redeploy the previous image tag. Or
+`kubectl set image deployment/dingdong dingdong=ghcr.io/<your-org>/dingdong:<old>`
+for an emergency override (the controller will reconcile back to whatever's
+in git within a minute, so `git revert` is the durable path).
 
 ## Conventions worth adopting
 
-- `from` = `<machine>:<agent-runtime>[:<task>]` — e.g. `mbp:claude:hosts-fix`
+- `from` = `<machine>:<agent-runtime>[:<task>]` — e.g. `laptop:claude:demo`
 - `topic` = the task name, shared by all agents working on it
 - `kind`:
   - `knock` — generic poke

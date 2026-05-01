@@ -1,20 +1,23 @@
+# Replace `dingdong.example.com` with your own hostname and update the
+# `cert-manager.io/cluster-issuer` annotation to whichever ClusterIssuer your
+# cluster uses (e.g. `letsencrypt-prod`, an internal CA, etc.).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: dingdong
   namespace: dingdong
   annotations:
-    cert-manager.io/cluster-issuer: local-ca-issuer
+    cert-manager.io/cluster-issuer: REPLACE_ME_CLUSTER_ISSUER
     # SSE / long-lived streams: disable Traefik buffering and bump timeouts
     traefik.ingress.kubernetes.io/router.middlewares: dingdong-sse-headers@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - dingdong.neva.home.arpa
+        - dingdong.example.com
       secretName: dingdong-tls
   rules:
-    - host: dingdong.neva.home.arpa
+    - host: dingdong.example.com
       http:
         paths:
           - path: /

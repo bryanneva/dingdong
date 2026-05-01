@@ -9,6 +9,23 @@
             "command": "bash -c 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); for dir in cmd cmd/dingdong-cli internal internal/server internal/ui internal/ui/static; do if [ -d \"$root/$dir\" ]; then ignored=$(git -C \"$root\" check-ignore -v \"$dir/\" 2>/dev/null); if [ -n \"$ignored\" ]; then echo \"BLOCKED: source dir is matched by .gitignore: $ignored\" >&2; echo \"  Anchor binary patterns with leading slash (e.g. /dingdong-cli not dingdong-cli)\" >&2; echo \"  Run: make verify-fresh-clone   to confirm sources are tracked.\" >&2; exit 2; fi; fi; done; exit 0'",
             "timeout": 10,
             "statusMessage": "Checking source dirs not silently gitignored..."
+          },
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/scripts/check-public-safe.sh\" push",
+            "timeout": 15,
+            "statusMessage": "Scanning push for personal/internal patterns..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git commit*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/scripts/check-public-safe.sh\" commit",
+            "timeout": 15,
+            "statusMessage": "Scanning staged diff for personal/internal patterns..."
           }
         ]
       },

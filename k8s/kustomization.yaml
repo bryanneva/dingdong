@@ -1,8 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Namespace is created by manifests/namespaces in homelab-ci to keep
-# bootstrap/teardown ordered with the rest of the cluster. We only own the
-# workloads that live inside it.
+# This kustomization assumes the `dingdong` namespace already exists.
+# Create it once via `kubectl create namespace dingdong` (or in a separate
+# bootstrap kustomization) before pointing your GitOps controller at this
+# directory.
 resources:
   - dingdong-secret.yaml
   - deployment.yaml

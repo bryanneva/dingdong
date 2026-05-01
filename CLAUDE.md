@@ -18,7 +18,7 @@ internal/ui/
   ui.go                       embed.FS for static assets
   static/index.html, app.js   one-page web UI (vanilla JS, EventSource)
 cmd/dingdong-cli/main.go      knock | wait | tail subcommands
-deploy/k8s/                   namespace, deployment, service, ingress, secret.example
+k8s/                          example manifests (deployment, service, ingress, secret)
 Dockerfile, Makefile          multi-stage build, distroless runtime
 ```
 
@@ -50,18 +50,17 @@ export DINGDONG_URL=http://localhost:8080 DINGDONG_TOKEN=localdev
 go run ./cmd/dingdong-cli knock --from test --topic demo --kind info --subject hi
 ```
 
-## Deploy (k3s-home)
+## Deploy
 
-GitOps via Flux. The pipeline is owned in this repo
-(`.github/workflows/release.yml`); registration happens in
-[`homelab-ci/manifests/flux-sources/dingdong.yaml`](https://github.com/bryanneva/homelab-ci/tree/main/manifests/flux-sources).
+GitOps pipeline owned in this repo (`.github/workflows/release.yml`); cluster
+registration is your GitOps controller's responsibility (Flux, ArgoCD, …).
 
 On every push to `main`:
-1. CI builds a multi-arch image and pushes `ghcr.io/bryanneva/dingdong:main`
+1. CI builds a multi-arch image and pushes `ghcr.io/<your-org>/dingdong:main`
    plus `:main-<sha7>`.
 2. CI runs `yq` to set `images[0].newTag` in `k8s/kustomization.yaml` to
    `main-<sha7>` and commits the bump back as `github-actions[bot]`.
-3. Flux detects the source-repo change within ~1 minute and applies the new
+3. Your GitOps controller detects the source-repo change and applies the new
    manifests; the rollout uses `Recreate` (in-memory state can't tolerate
    two-pod overlap).
 
@@ -69,35 +68,27 @@ The `[skip ci]` token in the bot's commit message + the `paths-ignore` block
 on `release.yml` prevent re-triggering. Don't hand-edit
 `k8s/kustomization.yaml`'s `images:` block — CI owns it.
 
-Secret is supplied by the `OnePasswordItem` in `k8s/dingdong-secret.yaml`
-(vault item: `Homelab/dingdong`, field: `token`). Hostname is
-`dingdong.neva.home.arpa`, TLS via `local-ca-issuer`.
+The example secret manifest (`k8s/dingdong-secret.yaml`) uses the 1Password
+operator, but you can swap it for any secret source that produces a
+`dingdong-token` Secret with a `token` key. The example ingress targets
+`dingdong.example.com`; replace it with your own hostname and cert-issuer.
 
 For local iteration on the deployment manifests, use `make render` to see the
-hydrated YAML Flux would apply.
+hydrated YAML your controller would apply.
 
 ## Machine-Network Safety
 
-Cluster-internal IPs (OrbStack VM bridge, k3s pod/service CIDR — typically
-`192.168.139.0/24`, `10.42.0.0/16`, `10.43.0.0/16`) are not routable from
-clients on a different host or subnet. User-facing docs, topic files, and
-bootstrap instructions must reference one of:
+Cluster-internal IPs (VM bridge networks, k3s pod/service CIDR — typically
+something in `10.x.x.x` or `192.168.x.x`) are not routable from clients on a
+different host or subnet. User-facing docs and bootstrap instructions must
+reference one of:
 
-- The DNS hostname: `dingdong.neva.home.arpa` (TLS via local-ca-issuer)
-- The host LAN IP (the Mac Studio's address on `192.168.1.0/24`)
-- The Tailscale IP (works from anywhere on the tailnet)
+- A DNS hostname that resolves on the client's network
+- The host's LAN IP (routable from the same subnet)
+- A VPN-overlay IP (Tailscale, WireGuard, etc.) when crossing networks
 
 Before documenting a URL or `/etc/hosts` entry for cross-machine bootstrap,
-probe from a machine on a different subnet:
-
-```sh
-dig +short dingdong.neva.home.arpa     # should return a LAN IP, not 192.168.139.x
-curl -sf https://dingdong.neva.home.arpa/healthz
-```
-
-Caught by the cross-machine bootstrap dogfood (2026-05-01) — an
-OrbStack-internal IP shipped in the bootstrap topic and broke the MBA's
-clone on `192.168.1.0/24`. See dotfiles#62 for the topic-file fix.
+probe from a machine on a different subnet to confirm reachability.
 
 ## Shipping Gate
 
@@ -115,8 +106,28 @@ Before declaring any work "repo-shipped" (merged and ready for cross-machine use
    `display: flex` overriding UA `[hidden]`) shipped because curl-only validation
    doesn't catch CSS specificity bugs.
 
+## Public-repo Safety
+
+This repo is **public**. Before committing or pushing, the
+`.claude/settings.json` PreToolUse hooks scan staged content for personal /
+internal patterns and block the operation if any are found. Patterns currently
+flagged:
+
+- `*.home.arpa` hostnames (homelab-only DNS)
+- Real personal email addresses other than the noreply git author
+- Specific cluster-internal CIDRs that don't belong in example docs
+- Apparent bearer tokens (long hex strings on their own line)
+- 1Password vault paths (`vaults/<name>/items/<name>`)
+
+If the hook blocks legitimately-public content (e.g. you're documenting the
+`.home.arpa` reservation generically), you can override for a single
+operation by exporting `DINGDONG_PUBLIC_OVERRIDE=1` in the shell that runs
+the commit. Don't make this the default — the whole point is the catch.
+
+To extend the pattern list, edit
+`.claude/scripts/check-public-safe.sh`.
+
 ## What the MVP deliberately leaves out
 
-See the plan at `~/.claude/plans/i-want-to-make-twinkly-hoare.md`. Short list:
-SQLite persistence, per-agent identity, MCP server, ACLs, mobile push,
-threading UI. Add them only when the bare protocol clearly needs them.
+Short list: SQLite persistence, per-agent identity, MCP server, ACLs, mobile
+push, threading UI. Add them only when the bare protocol clearly needs them.

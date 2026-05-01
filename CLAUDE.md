@@ -52,11 +52,29 @@ go run ./cmd/dingdong-cli knock --from test --topic demo --kind info --subject h
 
 ## Deploy (k3s-home)
 
-The manifests follow the homelab pattern (`~/Development/homelab-ci/manifests/homepage`).
-`make image push deploy` after first generating a real token into
-`deploy/k8s/secret.yaml` (gitignored). Hostname is `dingdong.neva.home.arpa`,
-TLS via `local-ca-issuer`. Single replica with `Recreate` strategy because the
-state is in-memory.
+GitOps via Flux. The pipeline is owned in this repo
+(`.github/workflows/release.yml`); registration happens in
+[`homelab-ci/manifests/flux-sources/dingdong.yaml`](https://github.com/bryanneva/homelab-ci/tree/main/manifests/flux-sources).
+
+On every push to `main`:
+1. CI builds a multi-arch image and pushes `ghcr.io/bryanneva/dingdong:main`
+   plus `:main-<sha7>`.
+2. CI runs `yq` to set `images[0].newTag` in `k8s/kustomization.yaml` to
+   `main-<sha7>` and commits the bump back as `github-actions[bot]`.
+3. Flux detects the source-repo change within ~1 minute and applies the new
+   manifests; the rollout uses `Recreate` (in-memory state can't tolerate
+   two-pod overlap).
+
+The `[skip ci]` token in the bot's commit message + the `paths-ignore` block
+on `release.yml` prevent re-triggering. Don't hand-edit
+`k8s/kustomization.yaml`'s `images:` block — CI owns it.
+
+Secret is supplied by the `OnePasswordItem` in `k8s/dingdong-secret.yaml`
+(vault item: `Homelab/dingdong`, field: `token`). Hostname is
+`dingdong.neva.home.arpa`, TLS via `local-ca-issuer`.
+
+For local iteration on the deployment manifests, use `make render` to see the
+hydrated YAML Flux would apply.
 
 ## What the MVP deliberately leaves out
 

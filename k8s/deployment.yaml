@@ -17,7 +17,10 @@ spec:
     spec:
       containers:
         - name: dingdong
-          image: ghcr.io/bryanneva/dingdong:dev
+          # Tag is rewritten on every push to main by .github/workflows/release.yml
+          # via `kustomize edit set image`. The bootstrap tag below will sit in
+          # ImagePullBackOff until the first successful CI run lands on main.
+          image: ghcr.io/bryanneva/dingdong:bootstrap
           imagePullPolicy: IfNotPresent
           args: ["--addr=:8080", "--capacity=1000"]
           env:

@@ -1,0 +1,37 @@
+version: "2"
+
+run:
+  timeout: 3m
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gocritic
+    - misspell
+    - revive
+    - unconvert
+  settings:
+    revive:
+      rules:
+        # Disable the godoc-required rules — dingdong uses clear identifiers
+        # instead of comment-padded prose. Re-enable once the API surface
+        # stabilizes if doc coverage becomes a concern.
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -1,8 +1,8 @@
 name: Release
 
 # Build a multi-arch image, push it to GHCR, then commit the new tag back into
-# k8s/kustomization.yaml so Flux (registered in homelab-ci/manifests/flux-sources)
-# rolls it out automatically.
+# k8s/kustomization.yaml so the GitOps controller (Flux/ArgoCD/etc., registered
+# in your own controller's source list) rolls it out automatically.
 #
 # The bot's commit-back doesn't re-trigger this workflow because pushes signed
 # by the default GITHUB_TOKEN don't fan out, and paths-ignore covers us if the

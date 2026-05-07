@@ -1,0 +1,14 @@
+# PR policy override for dingdong.
+#
+# This file inherits all values from ~/.claude/pr-policy.defaults.yaml.
+# Only fields you want to diverge on need to be set below — anything omitted
+# falls back to the global default.
+#
+# Common overrides:
+#   size:
+#     soft_limit_loc: 100      # stricter than global 200
+#   enforcement:
+#     advisory: false           # make Tekton check a merge gate
+#     block_merge: true
+
+# (no overrides — using global defaults)

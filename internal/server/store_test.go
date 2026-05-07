@@ -49,7 +49,11 @@ func TestNewID_Format(t *testing.T) {
 
 func TestNewID_LexSortable(t *testing.T) {
 	id1 := NewID()
-	time.Sleep(time.Microsecond)
+	// 1 ms gap (not 1 µs) — under heavy CI load, two time.Now().UnixNano()
+	// calls separated by a microsecond can land on the same nanosecond, in
+	// which case the 6 random tiebreak bytes decide order ~50% of the time
+	// and the test flakes.
+	time.Sleep(time.Millisecond)
 	id2 := NewID()
 	if id1 >= id2 {
 		t.Errorf("lex order broken: id1=%s, id2=%s", id1, id2)

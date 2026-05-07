@@ -2,14 +2,26 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 )
 
+// maxKnockBytes caps POST /v1/knocks bodies. Knocks are short coordination
+// messages — a few hundred bytes is typical, an oversize body almost always
+// indicates a misbehaving client or accidental file upload.
+const maxKnockBytes = 1 << 20 // 1 MiB
+
 func (s *Server) handlePostKnock(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxKnockBytes)
 	var k Knock
 	if err := json.NewDecoder(r.Body).Decode(&k); err != nil {
+		var mb *http.MaxBytesError
+		if errors.As(err, &mb) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 		return
 	}

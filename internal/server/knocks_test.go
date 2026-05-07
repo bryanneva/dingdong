@@ -76,6 +76,20 @@ func TestPostKnock_BadJSON(t *testing.T) {
 	}
 }
 
+func TestPostKnock_OversizedBody(t *testing.T) {
+	ts, _ := newTestServer(t)
+	// JSON is valid; only the size triggers the cap. Pad subject past 1MB.
+	big := strings.Repeat("x", (1<<20)+1024)
+	body := `{"from":"alice","subject":"` + big + `"}`
+	resp := doRequest(t, bearerReq(t, http.MethodPost, ts.URL+"/v1/knocks", body))
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		buf, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d, body=%s; want 413", resp.StatusCode, buf)
+	}
+}
+
 func TestPostKnock_MissingFrom(t *testing.T) {
 	ts, _ := newTestServer(t)
 	resp := doRequest(t, bearerReq(t, http.MethodPost, ts.URL+"/v1/knocks", `{"topic":"ops"}`))

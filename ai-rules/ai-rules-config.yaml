@@ -1,0 +1,3 @@
+agents: [claude, codex]
+command_agents: [claude, codex]
+gitignore: false

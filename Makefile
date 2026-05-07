@@ -1,7 +1,7 @@
 IMAGE ?= ghcr.io/bryanneva/dingdong
 TAG   ?= dev
 
-.PHONY: build cli test vet run image push deploy clean verify-fresh-clone
+.PHONY: build cli test vet lint run image push deploy clean verify-fresh-clone
 
 build:
 	go build -o bin/dingdong .
@@ -14,6 +14,9 @@ test:
 
 vet:
 	go vet ./...
+
+lint:
+	golangci-lint run ./...
 
 run: build
 	DINGDONG_TOKEN=$${DINGDONG_TOKEN:-localdev} ./bin/dingdong --addr :8080

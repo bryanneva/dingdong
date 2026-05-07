@@ -81,7 +81,21 @@ patterns=(
   "long hex token literal|(^|[^A-Za-z0-9])[a-f0-9]{32,}([^A-Za-z0-9]|$)"
 
   # Real personal hostname/machine names that shouldn't be in examples. Extend.
-  "personal machine name|\\b(mbp|mba|mac.studio|mac-studio|bryans-mac)\\b"
+  "personal machine name|\\b(mbp|mba|mac.studio|mac-studio|bryans-mac|MacBook-Air)\\b"
+
+  # Private LAN CIDRs (RFC1918). Generic instructional text using literal
+  # placeholders like 192.168.x.x is fine (won't match \\d ranges); real values
+  # like 192.168.1.46 will trip this. Use placeholder filters or refine the
+  # regex if a doc legitimately needs an example IP.
+  "private LAN CIDR (192.168.x.x)|\\b192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3}\\b"
+  "private LAN CIDR (10.x.x.x)|\\b10\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\b"
+
+  # Supabase project reference IDs are exactly 20 lowercase alpha chars and
+  # uniquely identify a hosted database. Anchor near .supabase.co or pooler.
+  "Supabase project ref|\\b[a-z]{20}\\b\\.supabase\\.co|pooler\\.supabase\\.com.*\\b[a-z]{20}\\b"
+
+  # Personal filesystem paths leak the author's machine layout.
+  "personal filesystem path|(~/Development/github\\.com/|~/Google Drive/My Drive/|/Users/bryanneva/)"
 )
 
 violations=()

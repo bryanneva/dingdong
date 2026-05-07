@@ -1,0 +1,15 @@
+[tools]
+go = "1.26"
+golangci-lint = "2.11"
+
+[tasks.build]
+run = "make build"
+description = "Build dingdong server + CLI"
+
+[tasks.test]
+run = "make test"
+description = "Run unit tests"
+
+[tasks.lint]
+run = "make lint"
+description = "Run golangci-lint"

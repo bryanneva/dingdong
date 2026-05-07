@@ -56,18 +56,17 @@ func NewStore(cap int) *Store {
 }
 
 func (s *Store) Add(k Knock) {
+	// Hold the lock through the fan-out so a concurrent cancel() (which also
+	// takes s.mu before close()) cannot close a subscriber channel between our
+	// snapshot and our send. Each send is non-blocking, so the loop is O(N)
+	// in the number of subscribers with constant work per sub.
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.items = append(s.items, k)
 	if len(s.items) > s.cap {
 		s.items = s.items[len(s.items)-s.cap:]
 	}
-	subs := make([]*subscription, 0, len(s.subs))
 	for sub := range s.subs {
-		subs = append(subs, sub)
-	}
-	s.mu.Unlock()
-
-	for _, sub := range subs {
 		select {
 		case sub.ch <- k:
 		default:

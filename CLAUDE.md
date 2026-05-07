@@ -50,6 +50,30 @@ export DINGDONG_URL=http://localhost:8080 DINGDONG_TOKEN=localdev
 go run ./cmd/dingdong-cli knock --from test --topic demo --kind info --subject hi
 ```
 
+## TDD
+
+`internal/server` has unit tests colocated as `*_test.go`. The suite uses
+Go's standard `testing` + `net/http/httptest`. Run:
+
+```sh
+make test                                # go test ./... — what CI runs
+go test -race ./internal/server/...      # race detector — catches the
+                                         # Add/cancel send-on-closed-channel
+                                         # class of bug
+go test -cover ./internal/server/...     # coverage summary
+go test -coverprofile=/tmp/cov.out ./internal/server/... && \
+  go tool cover -func=/tmp/cov.out       # per-function breakdown
+```
+
+CI today runs `make test` without `-race`. Run the race detector locally
+before push; wiring `-race` into the GitHub Actions matrix is a follow-up.
+
+Test helpers in `internal/server/helpers_test.go` (`newTestServer`,
+`bearerReq`). Synthetic IDs in tests must be lex-ordered to match the
+`since` filter's strict-greater-than semantics — real `NewID()` output is
+time-sorted, so prefer `"id001"`...`"id00N"` over arbitrary strings like
+`"sentinel"` (which lex-sorts after `"live1"` and breaks de-dup).
+
 ## Deploy
 
 GitOps pipeline owned in this repo (`.github/workflows/release.yml`); cluster

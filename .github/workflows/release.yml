@@ -144,4 +144,13 @@ jobs:
           else
             echo "PR #${existing} already exists for ${branch}; skipping create."
           fi
+          # First-push-on-new-branch workflow trigger gap: GitHub sometimes
+          # doesn't fire the pull_request:opened event when a branch is
+          # pushed before the PR is opened. The synchronize event on the
+          # second push reliably triggers CI. Push an empty commit so the
+          # bump PR's required checks (go + image) actually run, otherwise
+          # gh pr merge --auto sits forever waiting on checks that never
+          # registered.
+          git commit --allow-empty -m "ci: retrigger after fresh-branch CI miss"
+          git push origin "$branch"
           gh pr merge --auto --squash --delete-branch "$branch"

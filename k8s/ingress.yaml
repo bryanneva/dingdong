@@ -1,23 +1,23 @@
-# Replace `dingdong.example.com` with your own hostname and update the
-# `cert-manager.io/cluster-issuer` annotation to whichever ClusterIssuer your
-# cluster uses (e.g. `letsencrypt-prod`, an internal CA, etc.).
+# Hostname + ClusterIssuer wired for the homelab cluster (k3s-home,
+# Traefik fronts via OrbStack auto-publish, cert-manager + local-ca-issuer).
+# When forking this manifest for another cluster, swap host + cluster-issuer.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: dingdong
   namespace: dingdong
   annotations:
-    cert-manager.io/cluster-issuer: REPLACE_ME_CLUSTER_ISSUER
+    cert-manager.io/cluster-issuer: local-ca-issuer
     # SSE / long-lived streams: disable Traefik buffering and bump timeouts
     traefik.ingress.kubernetes.io/router.middlewares: dingdong-sse-headers@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - dingdong.example.com
+        - dingdong.neva.home.arpa
       secretName: dingdong-tls
   rules:
-    - host: dingdong.example.com
+    - host: dingdong.neva.home.arpa
       http:
         paths:
           - path: /

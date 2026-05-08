@@ -78,18 +78,25 @@ cluster — the hostname, cert-issuer, and secret source are all environment-
 specific.
 
 ```
-push to main                          watches via GitRepository
-   │                                       │
-   ▼                                       ▼
-.github/workflows/release.yml        cluster GitOps (Flux/ArgoCD/etc.)
-  ├─ go vet/build/test                  │
-  ├─ docker buildx push ghcr.io         ▼
-  └─ kustomize edit + commit ──► k8s/kustomization.yaml ─► applies k8s/
+push to main                                       watches via GitRepository
+   │                                                    │
+   ▼                                                    ▼
+.github/workflows/release.yml                     cluster GitOps (Flux/ArgoCD/etc.)
+  ├─ go vet/build/test                                  │
+  ├─ docker buildx push ghcr.io                         ▼
+  └─ open `chore/deploy-bump-…` PR                k8s/kustomization.yaml ─► applies k8s/
+       └─ auto-merge (squash) once go+image pass ──► (updates kustomization.yaml on main)
 ```
 
-**Steady state**: merge to `main` → image built and pushed → CI commits the
-new tag into `k8s/kustomization.yaml` → Flux picks up the change within ~1
-minute and rolls out a new pod. There is no manual deploy step.
+**Steady state**: merge to `main` → image built and pushed → CI opens a
+`chore(deploy): bump image to main-<sha>` PR that auto-merges once required
+checks pass → `k8s/kustomization.yaml` updated on `main` → Flux picks up the
+change within ~1 minute and rolls out a new pod. There is no manual deploy
+step.
+
+The PR-based bump replaces direct push because `main` is branch-protected.
+See `CLAUDE.md` "Deploy-bump prereqs" for the one-time `allow_auto_merge`
+toggle and `DEPLOY_BOT_TOKEN` secret your fork will need.
 
 ### One-time setup
 
@@ -119,9 +126,9 @@ only writer for `ghcr.io` tags and `k8s/kustomization.yaml`.
 
 ### Rollback
 
-Revert the bot's `chore(deploy): bump image to main-…` commit and push;
-your GitOps controller will redeploy the previous image tag. Or
-`kubectl set image deployment/dingdong dingdong=ghcr.io/<your-org>/dingdong:<old>`
+Revert the squash-merged `chore(deploy): bump image to main-…` commit on
+`main` and push; your GitOps controller will redeploy the previous image
+tag. Or `kubectl set image deployment/dingdong dingdong=ghcr.io/<your-org>/dingdong:<old>`
 for an emergency override (the controller will reconcile back to whatever's
 in git within a minute, so `git revert` is the durable path).
 

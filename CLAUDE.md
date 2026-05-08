@@ -122,6 +122,52 @@ gh label create deploy --color 1d76db \
   --description "Auto-generated deploy-bump PR (release.yml)"
 ```
 
+### Known limitation: bump-PR CI may not auto-trigger
+
+GitHub has anti-loop protection that suppresses `pull_request` events on
+PRs created from inside a workflow run, even when the workflow uses a
+fine-scoped PAT acting as a user. Symptoms: bump PR opens, auto-merge
+arms (`enabledBy: bryanneva`, `mergeMethod: SQUASH`), but `go` and
+`image` checks never register. Auto-merge sits forever.
+
+The release.yml workflow attempts to work around this by pushing an
+empty `ci: retrigger after fresh-branch CI miss` commit immediately
+after `gh pr create`. Empirically this worked for the first bump PR
+in the repo (#26), but did NOT work for subsequent bump PRs (#27, #29)
+in the same hour — GitHub appears to deduplicate / rate-limit
+workflow-context `pull_request` events.
+
+**Workarounds when a bump PR sits stuck**:
+
+1. **Push another empty commit from your own gh auth** (not the FGT) —
+   sometimes triggers CI:
+   ```sh
+   git fetch origin chore/deploy-bump-main-<sha>
+   git switch -c temp-bump origin/chore/deploy-bump-main-<sha>
+   git commit --allow-empty -m "ci: retrigger"
+   git push origin temp-bump:chore/deploy-bump-main-<sha>
+   git switch main && git branch -D temp-bump
+   ```
+2. **Admin-merge** if the diff is mechanically-generated (yq on
+   `kustomization.yaml`) and the image is already pushed to GHCR:
+   ```sh
+   gh pr merge <N> --admin --squash --delete-branch
+   ```
+   Safe because: (a) `enforce_admins: false` allows admin bypass,
+   (b) the bump diff is one line, (c) the image was verified by
+   the Release workflow's own `go vet/build/test` before opening
+   the PR.
+3. **Trigger a fresh Release run** via `gh workflow run release.yml
+   --ref main` if the bump PR is stale (main moved past it). This
+   builds a new image at the latest main SHA and opens a fresh
+   bump PR.
+
+A more durable fix would migrate from a PAT to a GitHub App
+installation token (App-created PRs reliably trigger workflows under
+a different identity model) or switch ci.yml from `pull_request` to
+`pull_request_target`. Both are larger changes; deferred until the
+admin-merge friction outgrows the alternative.
+
 The example secret manifest (`k8s/dingdong-secret.yaml`) uses the 1Password
 operator, but you can swap it for any secret source that produces a
 `dingdong-token` Secret with a `token` key. The example ingress targets

@@ -70,6 +70,11 @@ schema — agents adopt naming conventions on top.
 Auth: `Authorization: Bearer <DINGDONG_TOKEN>` on every endpoint, or
 `?token=<DINGDONG_TOKEN>` for browser/`curl -N` convenience.
 
+**UI bookmark shortcut**: visit `https://<host>/?token=<DINGDONG_TOKEN>` once
+and the web UI absorbs the token into `localStorage` (then strips it from
+the URL bar). The token persists across reloads and browser restarts.
+"forget token" in the header clears it.
+
 ## Deploy
 
 The manifests in `k8s/` are an example layout for a homelab k3s cluster using

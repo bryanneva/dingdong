@@ -12,13 +12,13 @@
   let knocks = [];
 
   function getToken() {
-    return sessionStorage.getItem(TOKEN_KEY) || "";
+    return localStorage.getItem(TOKEN_KEY) || "";
   }
   function setToken(t) {
-    sessionStorage.setItem(TOKEN_KEY, t);
+    localStorage.setItem(TOKEN_KEY, t);
   }
   function forgetToken() {
-    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
     if (es) es.close();
     promptForToken();
   }
@@ -125,6 +125,18 @@
         console.error("bad knock payload", err, ev.data);
       }
     });
+  }
+
+  // Bookmark shortcut: visiting `/?token=XXX` absorbs the token into
+  // localStorage and strips it from the URL bar so it isn't left in
+  // browser history. Once stashed, the token persists across reloads
+  // and browser restarts.
+  const urlToken = new URLSearchParams(window.location.search).get("token");
+  if (urlToken) {
+    setToken(urlToken);
+    const cleaned = new URL(window.location.href);
+    cleaned.searchParams.delete("token");
+    window.history.replaceState({}, "", cleaned.pathname + cleaned.search + cleaned.hash);
   }
 
   if (!getToken()) promptForToken();

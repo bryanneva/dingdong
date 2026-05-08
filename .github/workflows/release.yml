@@ -112,6 +112,13 @@ jobs:
             echo "Create a fine-scoped PAT (contents:write, pull-requests:write) and store it as DEPLOY_BOT_TOKEN." >&2
             exit 1
           fi
+          # gh pr merge --auto silently no-ops if allow_auto_merge isn't on at
+          # the repo level — fail loud here instead of letting bump-PRs sit.
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.allow_auto_merge')" != "true" ]; then
+            echo "ERROR: allow_auto_merge is not enabled on this repo." >&2
+            echo "Run: gh api -X PATCH repos/${GITHUB_REPOSITORY} -F allow_auto_merge=true" >&2
+            exit 1
+          fi
           branch="chore/deploy-bump-${SHORT}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

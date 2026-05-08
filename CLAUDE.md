@@ -83,14 +83,44 @@ On every push to `main`:
 1. CI builds a multi-arch image and pushes `ghcr.io/<your-org>/dingdong:main`
    plus `:main-<sha7>`.
 2. CI runs `yq` to set `images[0].newTag` in `k8s/kustomization.yaml` to
-   `main-<sha7>` and commits the bump back as `github-actions[bot]`.
+   `main-<sha7>` and opens a `chore(deploy): bump image to main-<sha7>` PR
+   from a `chore/deploy-bump-main-<sha7>` branch, then enables auto-merge
+   (squash + delete-branch). Once the required `go` and `image` checks pass
+   on the bump PR it merges itself.
 3. Your GitOps controller detects the source-repo change and applies the new
    manifests; the rollout uses `Recreate` (in-memory state can't tolerate
    two-pod overlap).
 
-The `[skip ci]` token in the bot's commit message + the `paths-ignore` block
-on `release.yml` prevent re-triggering. Don't hand-edit
+The PR-based bump is required because `main` is branch-protected. Direct
+pushes by `GITHUB_TOKEN` are rejected; opening a PR and auto-merging is the
+sanctioned path.
+
+The `[skip ci]` token in the bump commit message + the `paths-ignore` block
+on `release.yml` (`k8s/kustomization.yaml`) prevent the bump-PR's own
+squash-merge from re-triggering Release. Don't hand-edit
 `k8s/kustomization.yaml`'s `images:` block — CI owns it.
+
+### Deploy-bump prereqs (one-time, repo-level)
+
+The PR-based flow needs two repo-level settings the workflow cannot bootstrap
+itself:
+
+1. `allow_auto_merge` enabled on the repo:
+   ```sh
+   gh api -X PATCH repos/<owner>/<repo> -F allow_auto_merge=true
+   ```
+2. A `DEPLOY_BOT_TOKEN` repo secret holding a fine-scoped PAT with
+   `contents:write` and `pull-requests:write` on this repo. PRs created by
+   the default `GITHUB_TOKEN` would not trigger the required `go` / `image`
+   CI checks (GitHub's loop-prevention rule), so a PAT is required.
+
+A `deploy` label is also expected; the workflow attaches it to every bump
+PR. Create it once with:
+
+```sh
+gh label create deploy --color 1d76db \
+  --description "Auto-generated deploy-bump PR (release.yml)"
+```
 
 The example secret manifest (`k8s/dingdong-secret.yaml`) uses the 1Password
 operator, but you can swap it for any secret source that produces a

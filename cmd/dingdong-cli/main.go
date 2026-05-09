@@ -207,6 +207,7 @@ func runTail(cfg config, args []string) error {
 	topic := fs.String("topic", "", "topic filter")
 	to := fs.String("to", "", "recipient filter")
 	since := fs.String("since", "", "only return knocks with id > this")
+	noRetry := fs.Bool("no-retry", false, "exit on first SSE drop instead of reconnecting")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -215,18 +216,75 @@ func runTail(cfg config, args []string) error {
 	defer cancel()
 
 	enc := json.NewEncoder(os.Stdout)
-	err := streamKnocks(ctx, cfg, *topic, *to, *since, func(k knock) bool {
-		_ = enc.Encode(k)
-		return true // keep going
-	})
-	if errors.Is(err, context.Canceled) {
-		return nil
+	lastSince := *since
+
+	backoffSteps := []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second}
+	backoffIdx := 0
+
+	for {
+		prevSince := lastSince
+		err := streamKnocks(ctx, cfg, *topic, *to, lastSince, func(k knock) bool {
+			if k.ID != "" {
+				lastSince = k.ID
+			}
+			_ = enc.Encode(k)
+			return true
+		})
+
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+
+		var statusErr *httpStatusError
+		if errors.As(err, &statusErr) {
+			switch statusErr.code {
+			case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+				return statusErr
+			}
+		}
+
+		if *noRetry {
+			if err == nil {
+				return nil
+			}
+			return err
+		}
+
+		// Reset backoff if we received at least one event (server was clearly up)
+		if lastSince != prevSince {
+			backoffIdx = 0
+		}
+
+		delay := backoffSteps[backoffIdx]
+		if backoffIdx < len(backoffSteps)-1 {
+			backoffIdx++
+		}
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dingdong: stream disconnected (%v); reconnecting in %v\n", err, delay)
+		} else {
+			fmt.Fprintf(os.Stderr, "dingdong: stream closed; reconnecting in %v\n", delay)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(delay):
+		}
 	}
-	return err
 }
 
 func signalContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
+type httpStatusError struct {
+	code int
+	msg  string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("server returned %d: %s", e.code, e.msg)
 }
 
 // streamKnocks opens an SSE connection and calls onKnock for each event until
@@ -257,7 +315,7 @@ func streamKnocks(ctx context.Context, cfg config, topic, to, since string, onKn
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return &httpStatusError{code: resp.StatusCode, msg: strings.TrimSpace(string(b))}
 	}
 
 	scanner := bufio.NewScanner(resp.Body)

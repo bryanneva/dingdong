@@ -202,11 +202,20 @@ func runWait(cfg config, args []string) error {
 	}
 }
 
+// permanentErr wraps errors that should not be retried (e.g. 401/403/404).
+type permanentErr struct{ err error }
+
+func (e *permanentErr) Error() string { return e.err.Error() }
+func (e *permanentErr) Unwrap() error { return e.err }
+
+var tailRetryDelays = []time.Duration{1 * time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second}
+
 func runTail(cfg config, args []string) error {
 	fs := flag.NewFlagSet("tail", flag.ContinueOnError)
 	topic := fs.String("topic", "", "topic filter")
 	to := fs.String("to", "", "recipient filter")
 	since := fs.String("since", "", "only return knocks with id > this")
+	noRetry := fs.Bool("no-retry", false, "exit on first SSE drop instead of reconnecting")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -215,14 +224,47 @@ func runTail(cfg config, args []string) error {
 	defer cancel()
 
 	enc := json.NewEncoder(os.Stdout)
-	err := streamKnocks(ctx, cfg, *topic, *to, *since, func(k knock) bool {
-		_ = enc.Encode(k)
-		return true // keep going
-	})
-	if errors.Is(err, context.Canceled) {
-		return nil
+	lastSeen := *since
+	attempt := 0
+
+	for {
+		err := streamKnocks(ctx, cfg, *topic, *to, lastSeen, func(k knock) bool {
+			if k.ID != "" {
+				lastSeen = k.ID
+			}
+			_ = enc.Encode(k)
+			return true
+		})
+
+		// Context cancellation (SIGINT/SIGTERM) — stop cleanly.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
+
+		var perm *permanentErr
+		if errors.As(err, &perm) {
+			return err
+		}
+
+		// --no-retry: exit immediately (nil = clean EOF, non-nil = error).
+		if *noRetry {
+			return err
+		}
+
+		delay := tailRetryDelays[min(attempt, len(tailRetryDelays)-1)]
+		attempt++
+		reason := "EOF"
+		if err != nil {
+			reason = err.Error()
+		}
+		fmt.Fprintf(os.Stderr, "dingdong tail: connection dropped (%s); reconnecting in %v\n", reason, delay)
+
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil
+		}
 	}
-	return err
 }
 
 func signalContext() (context.Context, context.CancelFunc) {
@@ -257,7 +299,12 @@ func streamKnocks(ctx context.Context, cfg config, topic, to, since string, onKn
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		msg := fmt.Sprintf("server returned %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			return &permanentErr{errors.New(msg)}
+		}
+		return errors.New(msg)
 	}
 
 	scanner := bufio.NewScanner(resp.Body)

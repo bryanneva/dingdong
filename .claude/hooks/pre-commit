@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Git pre-commit hook: run the public-safety scanner over staged changes.
+# Installed by: make install-hooks
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/.claude/scripts/check-public-safe.sh" commit

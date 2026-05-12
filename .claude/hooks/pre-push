@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Git pre-push hook: run the public-safety scanner over commits about to leave the machine.
+# Installed by: make install-hooks
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/.claude/scripts/check-public-safe.sh" push

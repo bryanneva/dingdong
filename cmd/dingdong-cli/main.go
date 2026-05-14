@@ -73,7 +73,7 @@ func main() {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `dingdong — agent-to-agent knock service
+	_, _ = fmt.Fprint(w, `dingdong — agent-to-agent knock service
 
 usage:
   dingdong knock --from <id> --topic <t> [--to <id>] [--kind <k>] [--subject <s>] [--body <b>] [--in-reply-to <id>] [--body-stdin]
@@ -146,7 +146,7 @@ func runKnock(cfg config, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("server returned %s: %s", resp.Status, strings.TrimSpace(string(b)))
@@ -296,7 +296,7 @@ func streamKnocks(ctx context.Context, cfg config, topic, to, since string, onKn
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		msg := fmt.Sprintf("server returned %s: %s", resp.Status, strings.TrimSpace(string(b)))

@@ -40,7 +40,7 @@ func TestNewID_Format(t *testing.T) {
 		t.Errorf("len(NewID()) = %d, want 28", len(id))
 	}
 	for _, c := range id {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Errorf("NewID has non-hex char %q in %q", c, id)
 			break
 		}

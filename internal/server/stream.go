@@ -70,5 +70,5 @@ func writeSSE(w io.Writer, k Knock) {
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(w, "id: %s\nevent: knock\ndata: %s\n\n", k.ID, b)
+	_, _ = fmt.Fprintf(w, "id: %s\nevent: knock\ndata: %s\n\n", k.ID, b)
 }

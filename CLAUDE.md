@@ -227,6 +227,35 @@ the commit. Don't make this the default — the whole point is the catch.
 To extend the pattern list, edit
 `.claude/scripts/check-public-safe.sh`.
 
+## Git Hooks
+
+The Claude-side PreToolUse hooks above cover Claude-driven git ops. For
+direct-CLI commits (rare but possible), run once after a fresh clone:
+
+```sh
+make install-hooks
+```
+
+This sets `core.hooksPath = .git/hooks` locally and symlinks three scripts
+from `.claude/hooks/` into `.git/hooks/`:
+
+| Hook | Purpose |
+|------|---------|
+| `pre-commit` | Runs the public-safety scanner on the staged diff |
+| `pre-push` | Runs the public-safety scanner on commits about to leave the machine |
+| `prepare-commit-msg` | Appends `Closes #N` when the branch is `<prefix>/<N>-<desc>` |
+
+**Why `core.hooksPath` is set locally (not globally):** The global git config
+uses `core.hooksPath = ~/.git-hooks/`, and the global `prepare-commit-msg`
+delegates to a per-repo hook with `exec "$REPO_HOOK" "$@"`. Symlinking that
+script back into `.git/hooks/` would cause infinite recursion. Instead, we
+override `core.hooksPath` for this repo only, and the per-repo
+`prepare-commit-msg` inlines the `Closes #N` logic directly. Other repos on
+the machine are unaffected.
+
+The hook source files live in `.claude/hooks/` (source-controlled); `.git/hooks/`
+entries are symlinks and are not tracked by git.
+
 ## What the MVP deliberately leaves out
 
 Short list: SQLite persistence, per-agent identity, MCP server, ACLs, mobile

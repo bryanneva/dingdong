@@ -1,7 +1,7 @@
 IMAGE ?= ghcr.io/bryanneva/dingdong
 TAG   ?= dev
 
-.PHONY: build cli test vet lint run image push deploy clean verify-fresh-clone
+.PHONY: build cli test vet lint run image push deploy clean verify-fresh-clone install-hooks
 
 build:
 	go build -o bin/dingdong .
@@ -59,3 +59,20 @@ verify-fresh-clone:
 
 clean:
 	rm -rf bin/
+
+# Wire the public-safety scanner and Closes-#N trailer as real git hooks.
+# Sets core.hooksPath = .git/hooks (local to this repo) so our hooks run on
+# direct-CLI commits without touching the global ~/.git-hooks/ setup.
+# The global prepare-commit-msg delegation step is replaced by an inlined
+# per-repo script (.claude/hooks/prepare-commit-msg) to avoid infinite
+# recursion (see CLAUDE.md § Git Hooks).
+install-hooks:
+	@echo "--- Installing git hooks ---"
+	@git config core.hooksPath .git/hooks
+	@for hook in pre-commit pre-push prepare-commit-msg; do \
+	  src="../../.claude/hooks/$$hook"; \
+	  target=".git/hooks/$$hook"; \
+	  ln -sf "$$src" "$$target"; \
+	  echo "  $$target -> $$src"; \
+	done
+	@echo "OK: hooks installed (core.hooksPath = .git/hooks)."

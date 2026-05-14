@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Append "Closes #N" to commit message when branch matches <prefix>/<number>-<description>.
+# This is a per-repo replacement for the global prepare-commit-msg delegation step.
+# The global script at ~/.git-hooks/prepare-commit-msg delegates to this repo's
+# .git/hooks/prepare-commit-msg, but with core.hooksPath = .git/hooks that delegation
+# would cause infinite recursion. Instead, we inline the Closes #N logic here.
+# Installed by: make install-hooks
+set -euo pipefail
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="${2:-}"
+
+# Skip merge/squash/amend — the message already has context.
+[[ "$COMMIT_SOURCE" =~ ^(merge|squash|commit)$ ]] && exit 0
+
+# Extract the leading issue number from a branch like claude/9-foo or fix/42-bar.
+# sed returns the original string unchanged if the pattern doesn't match, so
+# we validate afterward that the result is purely numeric.
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+ISSUE_NUM=$(echo "$BRANCH" | sed -E 's@^[^/]+/([0-9]+)-.*@\1@')
+[[ "$ISSUE_NUM" =~ ^[0-9]+$ ]] || exit 0
+
+# Skip if a closer/fixer/ref trailer is already present.
+grep -qE '^(Closes|Fixes|Refs) #' "$COMMIT_MSG_FILE" && exit 0
+
+printf '\nCloses #%s\n' "$ISSUE_NUM" >> "$COMMIT_MSG_FILE"

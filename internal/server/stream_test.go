@@ -56,6 +56,55 @@ func TestStream_SinceResume(t *testing.T) {
 	}
 }
 
+func TestStream_LastEventIDHeaderResume(t *testing.T) {
+	ts, srv := newTestServer(t)
+	srv.store.Add(Knock{ID: "id001", From: "a", Topic: "ops"})
+	srv.store.Add(Knock{ID: "id002", From: "a", Topic: "ops"})
+	srv.store.Add(Knock{ID: "id003", From: "a", Topic: "ops"})
+
+	req := bearerReq(t, http.MethodGet, ts.URL+"/v1/stream", "")
+	req.Header.Set("Last-Event-ID", "id002")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req = req.WithContext(ctx)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/stream: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	frames := streamFrames(resp.Body)
+	got := readKnocks(t, frames, 1, 2*time.Second)
+	if got[0].ID != "id003" {
+		t.Errorf("Last-Event-ID=id002: id=%s, want id003 (exclusive resume via header)", got[0].ID)
+	}
+}
+
+func TestStream_QueryParamWinsOverLastEventIDHeader(t *testing.T) {
+	ts, srv := newTestServer(t)
+	srv.store.Add(Knock{ID: "id001", From: "a", Topic: "ops"})
+	srv.store.Add(Knock{ID: "id002", From: "a", Topic: "ops"})
+	srv.store.Add(Knock{ID: "id003", From: "a", Topic: "ops"})
+
+	// ?since=id001 should win; Last-Event-ID=id002 is the fallback and should be ignored.
+	req := bearerReq(t, http.MethodGet, ts.URL+"/v1/stream?since=id001", "")
+	req.Header.Set("Last-Event-ID", "id002")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req = req.WithContext(ctx)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/stream: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	frames := streamFrames(resp.Body)
+	got := readKnocks(t, frames, 2, 2*time.Second)
+	if got[0].ID != "id002" || got[1].ID != "id003" {
+		t.Errorf("since=id001 with Last-Event-ID=id002: ids=%v, want [id002 id003] (?since wins)", ids(got))
+	}
+}
+
 func TestStream_TopicFilter(t *testing.T) {
 	ts, srv := newTestServer(t)
 	srv.store.Add(Knock{ID: "id001", From: "a", Topic: "ops"})

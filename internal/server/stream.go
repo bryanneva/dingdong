@@ -18,6 +18,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := Filter{Topic: q.Get("topic"), To: q.Get("to")}
 	since := q.Get("since")
+	if since == "" {
+		since = r.Header.Get("Last-Event-ID")
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

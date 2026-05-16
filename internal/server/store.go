@@ -122,14 +122,17 @@ func (s *Store) Subscribe() (<-chan Knock, func()) {
 }
 
 // Close releases backend resources and closes all live subscriber channels
-// so SSE handlers unblock and return.
+// so SSE handlers unblock and return. backend.Close runs inside s.mu so a
+// concurrent Add can't sneak a Save in between subscriber teardown and the
+// backend shutdown (sqliteBackend.Close uses sync.Once and takes no
+// store-level locks, so this won't deadlock).
 func (s *Store) Close() error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	for sub := range s.subs {
 		delete(s.subs, sub)
 		close(sub.ch)
 	}
-	s.mu.Unlock()
 	return s.backend.Close()
 }
 

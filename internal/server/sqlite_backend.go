@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"sort"
 	"sync"
 	"time"
@@ -45,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_knocks_topic_id ON knocks(topic, id);
 const trimInterval = 1 * time.Hour
 
 // NewSQLiteStore opens (or creates) a SQLite database at path and returns
-// a Store wrapping it. Used by main.go to wire production durability.
+// a Store wrapping it.
 func NewSQLiteStore(path string, retentionRows int) (*Store, error) {
 	b, err := newSQLiteBackend(path, retentionRows)
 	if err != nil {
@@ -61,9 +62,11 @@ func newSQLiteBackend(path string, retentionRows int) (*sqliteBackend, error) {
 	// WAL + synchronous=NORMAL is the standard tradeoff for a single-pod
 	// service: crash-safe (durable on fsync at checkpoint), no per-commit
 	// fsync cost. busy_timeout backs off briefly on lock contention.
+	// Escape the path so a stray `?` or `&` from a test-tempdir layout can't
+	// shadow the pragma query string and silently disable WAL.
 	dsn := fmt.Sprintf(
 		"file:%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)",
-		path,
+		url.PathEscape(path),
 	)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

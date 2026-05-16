@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// defaultTopic is the always-present channel surfaced to clients even when the
-// ring buffer has no knocks for it. Posting still defaults to "default" in
-// handlePostKnock — this is a UI-anchor concept, not a server posting default.
+// defaultTopic is the channel name used in two places: Topics() always surfaces
+// it so the UI sidebar has a stable anchor even on a fresh server, and
+// handlePostKnock falls back to it when a knock arrives with topic="".
 const defaultTopic = "main"
 
 type Knock struct {

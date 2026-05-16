@@ -65,7 +65,7 @@
   }
 
   function escapeHTML(s) {
-    return String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   }
 
   function renderSidebar() {
@@ -105,14 +105,15 @@
         headers: { Authorization: "Bearer " + token },
       });
       if (resp.status === 401) {
+        stopTopicsPoll();
         promptForToken();
         return;
       }
       if (!resp.ok) return;
       const list = await resp.json();
       if (!Array.isArray(list)) return;
-      // Merge in case a knock arrival has already populated a topic the
-      // server hasn't yet observed (impossible today, but cheap insurance).
+      // A knock may arrive over SSE and be added via ensureTopic() before
+      // the next poll catches up — merge so the sidebar stays consistent.
       const merged = new Set(list);
       merged.add(DEFAULT_TOPIC);
       for (const t of topics) merged.add(t);

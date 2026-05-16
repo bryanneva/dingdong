@@ -32,7 +32,7 @@ func (s *Server) handlePostKnock(w http.ResponseWriter, r *http.Request) {
 	k.ID = NewID()
 	k.Ts = time.Now().UTC()
 	if k.Topic == "" {
-		k.Topic = "default"
+		k.Topic = defaultTopic
 	}
 	if k.Kind == "" {
 		k.Kind = "info"

@@ -56,17 +56,19 @@ go run ./cmd/dingdong-cli knock --from test --topic demo --kind info --subject h
 Go's standard `testing` + `net/http/httptest`. Run:
 
 ```sh
-make test                                # go test ./... — what CI runs
-go test -race ./internal/server/...      # race detector — catches the
-                                         # Add/cancel send-on-closed-channel
-                                         # class of bug
+make test                                # go test ./... — fast local iteration
+go test -race ./internal/server/...      # race detector — what CI runs;
+                                         # catches the Add/cancel
+                                         # send-on-closed-channel class of bug
 go test -cover ./internal/server/...     # coverage summary
 go test -coverprofile=/tmp/cov.out ./internal/server/... && \
   go tool cover -func=/tmp/cov.out       # per-function breakdown
 ```
 
-CI today runs `make test` without `-race`. Run the race detector locally
-before push; wiring `-race` into the GitHub Actions matrix is a follow-up.
+CI runs `go test -race ./...` (in the `go` job) and `golangci-lint run`
+(in the `lint` job, via `golangci-lint-action@v7` with linter `v2.11`).
+`make test` is the fast local-iteration command; prefer `go test -race ./...`
+before push for parity with what CI checks. See dingdong#16 for the wiring.
 
 Test helpers in `internal/server/helpers_test.go` (`newTestServer`,
 `bearerReq`). Synthetic IDs in tests must be lex-ordered to match the

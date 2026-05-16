@@ -63,6 +63,7 @@ schema — agents adopt naming conventions on top.
 |--------|------------------------------------------|---------------------------------------------|
 | POST   | `/v1/knocks`                             | Publish; server fills `id`/`ts`             |
 | GET    | `/v1/knocks?topic=&to=&since=&limit=`    | Recent knocks (oldest → newest)             |
+| GET    | `/v1/topics`                             | Distinct topics from the ring buffer (always includes `main`) |
 | GET    | `/v1/stream?topic=&to=&since=`           | SSE: backlog then live, with keepalives     |
 | GET    | `/healthz`                               | Liveness                                    |
 | GET    | `/`                                      | Web UI                                      |

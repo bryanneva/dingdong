@@ -37,7 +37,10 @@ func (s *Server) handlePostKnock(w http.ResponseWriter, r *http.Request) {
 	if k.Kind == "" {
 		k.Kind = "info"
 	}
-	s.store.Add(k)
+	if err := s.store.Add(k); err != nil {
+		http.Error(w, "store unavailable", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(k)
 }
@@ -50,7 +53,11 @@ func (s *Server) handleListKnocks(w http.ResponseWriter, r *http.Request) {
 	if limit == 0 {
 		limit = 100
 	}
-	out := s.store.List(f, since, limit)
+	out, err := s.store.List(f, since, limit)
+	if err != nil {
+		http.Error(w, "store unavailable", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }

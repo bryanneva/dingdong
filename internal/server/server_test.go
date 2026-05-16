@@ -20,8 +20,12 @@ func TestNew_DefaultsCap(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := New(Config{Token: testToken, Cap: tt.in})
-			if s.store.cap != tt.want {
-				t.Errorf("store.cap = %d, want %d", s.store.cap, tt.want)
+			mem, ok := s.store.backend.(*memBackend)
+			if !ok {
+				t.Fatalf("expected memBackend, got %T", s.store.backend)
+			}
+			if mem.cap != tt.want {
+				t.Errorf("memBackend.cap = %d, want %d", mem.cap, tt.want)
 			}
 		})
 	}

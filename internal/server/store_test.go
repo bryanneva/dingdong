@@ -73,11 +73,11 @@ func TestNewID_Unique(t *testing.T) {
 }
 
 func TestStore_RingEvictsOldest(t *testing.T) {
-	s := NewStore(3)
+	s := NewMemStore(3)
 	for i := 0; i < 5; i++ {
 		s.Add(Knock{ID: pad(i), Topic: "t"})
 	}
-	got := s.List(Filter{}, "", 100)
+	got, _ := s.List(Filter{}, "", 100)
 	if len(got) != 3 {
 		t.Fatalf("after 5 adds with cap=3: len=%d, want 3", len(got))
 	}
@@ -90,28 +90,28 @@ func TestStore_RingEvictsOldest(t *testing.T) {
 }
 
 func TestStore_List_SinceFilterLimit(t *testing.T) {
-	s := NewStore(100)
+	s := NewMemStore(100)
 	s.Add(Knock{ID: "id001", Topic: "ops", To: "alice"})
 	s.Add(Knock{ID: "id002", Topic: "marketing", To: "alice"})
 	s.Add(Knock{ID: "id003", Topic: "ops", To: ""})
 	s.Add(Knock{ID: "id004", Topic: "ops", To: "bob"})
 
 	t.Run("since is exclusive", func(t *testing.T) {
-		got := s.List(Filter{}, "id002", 100)
+		got, _ := s.List(Filter{}, "id002", 100)
 		if len(got) != 2 || got[0].ID != "id003" || got[1].ID != "id004" {
 			t.Errorf("got %+v, want [id003, id004]", ids(got))
 		}
 	})
 
 	t.Run("topic filter", func(t *testing.T) {
-		got := s.List(Filter{Topic: "ops"}, "", 100)
+		got, _ := s.List(Filter{Topic: "ops"}, "", 100)
 		if len(got) != 3 {
 			t.Errorf("topic=ops: len=%d (%v), want 3", len(got), ids(got))
 		}
 	})
 
 	t.Run("to filter includes broadcasts", func(t *testing.T) {
-		got := s.List(Filter{To: "alice"}, "", 100)
+		got, _ := s.List(Filter{To: "alice"}, "", 100)
 		// matches: id001 (alice), id002 (alice), id003 (broadcast); excludes id004 (bob)
 		if len(got) != 3 {
 			t.Errorf("to=alice: len=%d (%v), want 3", len(got), ids(got))
@@ -119,18 +119,18 @@ func TestStore_List_SinceFilterLimit(t *testing.T) {
 	})
 
 	t.Run("limit caps", func(t *testing.T) {
-		got := s.List(Filter{}, "", 2)
+		got, _ := s.List(Filter{}, "", 2)
 		if len(got) != 2 {
 			t.Errorf("limit=2: len=%d, want 2", len(got))
 		}
 	})
 
 	t.Run("limit≤0 defaults to 100", func(t *testing.T) {
-		got := s.List(Filter{}, "", 0)
+		got, _ := s.List(Filter{}, "", 0)
 		if len(got) != 4 {
 			t.Errorf("limit=0: len=%d, want 4 (default)", len(got))
 		}
-		got = s.List(Filter{}, "", -5)
+		got, _ = s.List(Filter{}, "", -5)
 		if len(got) != 4 {
 			t.Errorf("limit=-5: len=%d, want 4 (default)", len(got))
 		}
@@ -138,7 +138,7 @@ func TestStore_List_SinceFilterLimit(t *testing.T) {
 }
 
 func TestStore_SubscribeReceivesAdd(t *testing.T) {
-	s := NewStore(100)
+	s := NewMemStore(100)
 	ch, cancel := s.Subscribe()
 	defer cancel()
 
@@ -155,7 +155,7 @@ func TestStore_SubscribeReceivesAdd(t *testing.T) {
 }
 
 func TestStore_CancelIdempotentAndClosesChannel(t *testing.T) {
-	s := NewStore(10)
+	s := NewMemStore(10)
 	ch, cancel := s.Subscribe()
 	cancel()
 	cancel() // must not panic or double-close
@@ -167,7 +167,7 @@ func TestStore_CancelIdempotentAndClosesChannel(t *testing.T) {
 }
 
 func TestStore_SlowConsumerDropsRatherThanBlock(t *testing.T) {
-	s := NewStore(1000)
+	s := NewMemStore(1000)
 	ch, cancel := s.Subscribe()
 
 	const fired = 200
@@ -204,7 +204,7 @@ func TestStore_SlowConsumerDropsRatherThanBlock(t *testing.T) {
 // producers. Run under -race to catch any send-on-closed-channel or torn map
 // access between Add's send loop and Subscribe's cancel().
 func TestStore_RaceAddSubscribe(t *testing.T) {
-	s := NewStore(10000)
+	s := NewMemStore(10000)
 	const producers = 10
 	const itemsPerProducer = 100
 	const subCycles = 100
@@ -241,13 +241,13 @@ func TestStore_RaceAddSubscribe(t *testing.T) {
 }
 
 func TestStore_Topics_DistinctFromRingBuffer(t *testing.T) {
-	s := NewStore(100)
+	s := NewMemStore(100)
 	s.Add(Knock{ID: pad(1), Topic: "ops"})
 	s.Add(Knock{ID: pad(2), Topic: "marketing"})
 	s.Add(Knock{ID: pad(3), Topic: "ops"})
 	s.Add(Knock{ID: pad(4), Topic: "agents"})
 
-	got := s.Topics()
+	got, _ := s.Topics()
 	want := map[string]bool{"main": true, "ops": true, "marketing": true, "agents": true}
 	if len(got) != len(want) {
 		t.Fatalf("Topics()=%v, want keys %v", got, want)
@@ -264,16 +264,16 @@ func TestStore_Topics_DistinctFromRingBuffer(t *testing.T) {
 }
 
 func TestStore_Topics_AlwaysIncludesMain(t *testing.T) {
-	s := NewStore(100)
+	s := NewMemStore(100)
 	// No knocks added at all.
-	got := s.Topics()
+	got, _ := s.Topics()
 	if len(got) != 1 || got[0] != "main" {
 		t.Errorf("empty store Topics()=%v, want [main]", got)
 	}
 
 	// Even with non-main topics, main still appears.
 	s.Add(Knock{ID: pad(1), Topic: "ops"})
-	got = s.Topics()
+	got, _ = s.Topics()
 	found := false
 	for _, topic := range got {
 		if topic == "main" {
@@ -286,13 +286,13 @@ func TestStore_Topics_AlwaysIncludesMain(t *testing.T) {
 }
 
 func TestStore_Topics_Sorted(t *testing.T) {
-	s := NewStore(100)
+	s := NewMemStore(100)
 	s.Add(Knock{ID: pad(1), Topic: "zebra"})
 	s.Add(Knock{ID: pad(2), Topic: "alpha"})
 	s.Add(Knock{ID: pad(3), Topic: "main"}) // also added by user; should dedupe
 	s.Add(Knock{ID: pad(4), Topic: "beta"})
 
-	got := s.Topics()
+	got, _ := s.Topics()
 	want := []string{"alpha", "beta", "main", "zebra"}
 	if len(got) != len(want) {
 		t.Fatalf("Topics()=%v, want %v", got, want)
@@ -305,14 +305,14 @@ func TestStore_Topics_Sorted(t *testing.T) {
 }
 
 func TestStore_Topics_IgnoresEmptyTopic(t *testing.T) {
-	s := NewStore(100)
+	s := NewMemStore(100)
 	// A direct store.Add with empty topic shouldn't surface as a "" channel
 	// in the sidebar — the server defaults Topic at POST time, but the store
 	// itself doesn't enforce that, so Topics() must filter.
 	s.Add(Knock{ID: pad(1), Topic: ""})
 	s.Add(Knock{ID: pad(2), Topic: "ops"})
 
-	got := s.Topics()
+	got, _ := s.Topics()
 	for _, topic := range got {
 		if topic == "" {
 			t.Errorf("Topics()=%v, empty string leaked through", got)

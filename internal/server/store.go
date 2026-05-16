@@ -43,34 +43,49 @@ func (f Filter) Match(k Knock) bool {
 	return true
 }
 
+// Backend is the durability port. Implementations persist knocks and answer
+// historical queries; the in-memory subscriber hub on Store handles live
+// fan-out separately. Backends are responsible for their own concurrency.
+type Backend interface {
+	Save(Knock) error
+	Query(f Filter, since string, limit int) ([]Knock, error)
+	Topics() ([]string, error)
+	Close() error
+}
+
 type subscription struct {
 	ch chan Knock
 }
 
+// Store composes the live subscriber hub with a Backend. Add is held under
+// s.mu through both backend.Save and the fan-out loop so subscribers receive
+// events in the same order they're persisted, and so a concurrent cancel()
+// cannot close a subscriber channel between snapshot and send.
 type Store struct {
-	mu    sync.Mutex
-	cap   int
-	items []Knock
-	subs  map[*subscription]struct{}
+	mu      sync.Mutex
+	subs    map[*subscription]struct{}
+	backend Backend
 }
 
-func NewStore(cap int) *Store {
+func NewStore(backend Backend) *Store {
 	return &Store{
-		cap:  cap,
-		subs: make(map[*subscription]struct{}),
+		subs:    make(map[*subscription]struct{}),
+		backend: backend,
 	}
 }
 
-func (s *Store) Add(k Knock) {
-	// Hold the lock through the fan-out so a concurrent cancel() (which also
-	// takes s.mu before close()) cannot close a subscriber channel between our
-	// snapshot and our send. Each send is non-blocking, so the loop is O(N)
-	// in the number of subscribers with constant work per sub.
+// NewMemStore is a convenience constructor for tests and local development
+// that wraps a ring-buffer-backed Backend. Production callers should build
+// a durable backend (e.g., the SQLite one) and pass it to NewStore directly.
+func NewMemStore(cap int) *Store {
+	return NewStore(newMemBackend(cap))
+}
+
+func (s *Store) Add(k Knock) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.items = append(s.items, k)
-	if len(s.items) > s.cap {
-		s.items = s.items[len(s.items)-s.cap:]
+	if err := s.backend.Save(k); err != nil {
+		return err
 	}
 	for sub := range s.subs {
 		select {
@@ -79,49 +94,15 @@ func (s *Store) Add(k Knock) {
 			// Subscriber is slow; drop. They can recover via GET /v1/knocks?since=...
 		}
 	}
+	return nil
 }
 
-func (s *Store) List(f Filter, since string, limit int) []Knock {
-	if limit <= 0 {
-		limit = 100
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Knock, 0, limit)
-	for _, k := range s.items {
-		if since != "" && k.ID <= since {
-			continue
-		}
-		if !f.Match(k) {
-			continue
-		}
-		out = append(out, k)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
+func (s *Store) List(f Filter, since string, limit int) ([]Knock, error) {
+	return s.backend.Query(f, since, limit)
 }
 
-// Topics returns the sorted set of distinct topics observed in the ring
-// buffer, with "main" always included so the UI sidebar has a stable anchor
-// on a fresh server.
-func (s *Store) Topics() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	seen := map[string]struct{}{defaultTopic: {}}
-	for _, k := range s.items {
-		if k.Topic == "" {
-			continue
-		}
-		seen[k.Topic] = struct{}{}
-	}
-	out := make([]string, 0, len(seen))
-	for t := range seen {
-		out = append(out, t)
-	}
-	sort.Strings(out)
-	return out
+func (s *Store) Topics() ([]string, error) {
+	return s.backend.Topics()
 }
 
 func (s *Store) Subscribe() (<-chan Knock, func()) {
@@ -139,6 +120,85 @@ func (s *Store) Subscribe() (<-chan Knock, func()) {
 	}
 	return sub.ch, cancel
 }
+
+// Close releases backend resources and closes all live subscriber channels
+// so SSE handlers unblock and return.
+func (s *Store) Close() error {
+	s.mu.Lock()
+	for sub := range s.subs {
+		delete(s.subs, sub)
+		close(sub.ch)
+	}
+	s.mu.Unlock()
+	return s.backend.Close()
+}
+
+// memBackend is a ring-buffer-backed Backend. Used for tests and local
+// development where durability is not needed.
+type memBackend struct {
+	mu    sync.Mutex
+	cap   int
+	items []Knock
+}
+
+func newMemBackend(cap int) *memBackend {
+	if cap <= 0 {
+		cap = 1000
+	}
+	return &memBackend{cap: cap}
+}
+
+func (b *memBackend) Save(k Knock) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.items = append(b.items, k)
+	if len(b.items) > b.cap {
+		b.items = b.items[len(b.items)-b.cap:]
+	}
+	return nil
+}
+
+func (b *memBackend) Query(f Filter, since string, limit int) ([]Knock, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]Knock, 0, limit)
+	for _, k := range b.items {
+		if since != "" && k.ID <= since {
+			continue
+		}
+		if !f.Match(k) {
+			continue
+		}
+		out = append(out, k)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (b *memBackend) Topics() ([]string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	seen := map[string]struct{}{defaultTopic: {}}
+	for _, k := range b.items {
+		if k.Topic == "" {
+			continue
+		}
+		seen[k.Topic] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for t := range seen {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (b *memBackend) Close() error { return nil }
 
 // NewID returns a 28-char hex id whose lexicographic order matches creation
 // order: 8 bytes of unix-nanos big-endian + 6 random bytes for tiebreaks.

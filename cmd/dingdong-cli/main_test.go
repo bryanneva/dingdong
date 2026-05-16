@@ -353,6 +353,63 @@ func TestStreamKnocksReadsBody(t *testing.T) {
 	}
 }
 
+// TestNextTailDelayResetsOnEvent verifies the backoff-reset behavior that
+// runTail relies on: many event-less drops climb to the cap, but as soon as
+// a connection delivers at least one event, the next drop's first retry is
+// back to 1s instead of staying at the capped 10s. (issue #41)
+func TestNextTailDelayResetsOnEvent(t *testing.T) {
+	// Climb past the cap with event-less drops.
+	attempt := 0
+	for i := 0; i < 10; i++ {
+		_, attempt = nextTailDelay(tailRetryDelays, attempt, false)
+	}
+	cappedDelay, _ := nextTailDelay(tailRetryDelays, attempt, false)
+	if cappedDelay != 10*time.Second {
+		t.Fatalf("pre-reset delay=%v, want 10s (cap)", cappedDelay)
+	}
+
+	// A drop that DID emit at least one event resets the backoff: the very
+	// next delay we hand out is 1s, regardless of how high attempt was.
+	delay, attempt := nextTailDelay(tailRetryDelays, attempt, true)
+	if delay != 1*time.Second {
+		t.Errorf("post-event delay=%v, want 1s", delay)
+	}
+	if attempt != 1 {
+		t.Errorf("post-event attempt=%d, want 1", attempt)
+	}
+
+	// And the climb resumes from the reset point on subsequent event-less drops.
+	delay, attempt = nextTailDelay(tailRetryDelays, attempt, false)
+	if delay != 2*time.Second {
+		t.Errorf("post-reset second delay=%v, want 2s", delay)
+	}
+	delay, _ = nextTailDelay(tailRetryDelays, attempt, false)
+	if delay != 5*time.Second {
+		t.Errorf("post-reset third delay=%v, want 5s", delay)
+	}
+}
+
+// TestNextTailDelayClimbWithoutEvents documents the pre-fix climb so a
+// regression that re-broke reset-on-event would surface against a known curve.
+func TestNextTailDelayClimbWithoutEvents(t *testing.T) {
+	want := []time.Duration{
+		1 * time.Second,
+		2 * time.Second,
+		5 * time.Second,
+		10 * time.Second,
+		10 * time.Second, // capped
+		10 * time.Second, // capped
+	}
+	attempt := 0
+	for i, w := range want {
+		var got time.Duration
+		got, attempt = nextTailDelay(tailRetryDelays, attempt, false)
+		if got != w {
+			t.Errorf("attempt[%d] delay=%v, want %v", i, got, w)
+		}
+	}
+}
+
 // TestStreamKnocksUsesAuthHeader verifies that streamKnocks passes the token
 // as a ?token= query param (for EventSource compat) — regression for auth.
 func TestStreamKnocksUsesTokenParam(t *testing.T) {

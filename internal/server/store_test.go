@@ -240,6 +240,86 @@ func TestStore_RaceAddSubscribe(t *testing.T) {
 	wg.Wait()
 }
 
+func TestStore_Topics_DistinctFromRingBuffer(t *testing.T) {
+	s := NewStore(100)
+	s.Add(Knock{ID: pad(1), Topic: "ops"})
+	s.Add(Knock{ID: pad(2), Topic: "marketing"})
+	s.Add(Knock{ID: pad(3), Topic: "ops"})
+	s.Add(Knock{ID: pad(4), Topic: "agents"})
+
+	got := s.Topics()
+	want := map[string]bool{"main": true, "ops": true, "marketing": true, "agents": true}
+	if len(got) != len(want) {
+		t.Fatalf("Topics()=%v, want keys %v", got, want)
+	}
+	for _, topic := range got {
+		if !want[topic] {
+			t.Errorf("Topics() returned unexpected %q", topic)
+		}
+		delete(want, topic)
+	}
+	for missing := range want {
+		t.Errorf("Topics() missing %q", missing)
+	}
+}
+
+func TestStore_Topics_AlwaysIncludesMain(t *testing.T) {
+	s := NewStore(100)
+	// No knocks added at all.
+	got := s.Topics()
+	if len(got) != 1 || got[0] != "main" {
+		t.Errorf("empty store Topics()=%v, want [main]", got)
+	}
+
+	// Even with non-main topics, main still appears.
+	s.Add(Knock{ID: pad(1), Topic: "ops"})
+	got = s.Topics()
+	found := false
+	for _, topic := range got {
+		if topic == "main" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Topics()=%v, missing always-present main", got)
+	}
+}
+
+func TestStore_Topics_Sorted(t *testing.T) {
+	s := NewStore(100)
+	s.Add(Knock{ID: pad(1), Topic: "zebra"})
+	s.Add(Knock{ID: pad(2), Topic: "alpha"})
+	s.Add(Knock{ID: pad(3), Topic: "main"}) // also added by user; should dedupe
+	s.Add(Knock{ID: pad(4), Topic: "beta"})
+
+	got := s.Topics()
+	want := []string{"alpha", "beta", "main", "zebra"}
+	if len(got) != len(want) {
+		t.Fatalf("Topics()=%v, want %v", got, want)
+	}
+	for i, topic := range got {
+		if topic != want[i] {
+			t.Errorf("Topics()[%d]=%q, want %q", i, topic, want[i])
+		}
+	}
+}
+
+func TestStore_Topics_IgnoresEmptyTopic(t *testing.T) {
+	s := NewStore(100)
+	// A direct store.Add with empty topic shouldn't surface as a "" channel
+	// in the sidebar — the server defaults Topic at POST time, but the store
+	// itself doesn't enforce that, so Topics() must filter.
+	s.Add(Knock{ID: pad(1), Topic: ""})
+	s.Add(Knock{ID: pad(2), Topic: "ops"})
+
+	got := s.Topics()
+	for _, topic := range got {
+		if topic == "" {
+			t.Errorf("Topics()=%v, empty string leaked through", got)
+		}
+	}
+}
+
 // pad returns a fixed-width zero-padded decimal string. Used for synthetic IDs
 // whose lexicographic order matches insertion order.
 func pad(i int) string {

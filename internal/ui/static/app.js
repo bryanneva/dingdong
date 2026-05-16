@@ -1,15 +1,22 @@
 (function () {
   const TOKEN_KEY = "dingdong.token";
+  const DEFAULT_TOPIC = "main";
+  const TOPICS_POLL_MS = 15000;
+
   const feed = document.getElementById("feed");
   const dot = document.getElementById("status-dot");
-  const topicInput = document.getElementById("topic");
   const toInput = document.getElementById("to");
+  const channelList = document.getElementById("channel-list");
+  const activeChannelLabel = document.getElementById("active-channel");
   const overlay = document.getElementById("auth-overlay");
   const tokenInput = document.getElementById("token-input");
   const authForm = document.getElementById("auth-form");
 
   let es = null;
   let knocks = [];
+  let topics = [DEFAULT_TOPIC];
+  let activeTopic = DEFAULT_TOPIC;
+  let topicsPollTimer = null;
 
   function getToken() {
     return localStorage.getItem(TOKEN_KEY) || "";
@@ -20,6 +27,7 @@
   function forgetToken() {
     localStorage.removeItem(TOKEN_KEY);
     if (es) es.close();
+    stopTopicsPoll();
     promptForToken();
   }
   function promptForToken() {
@@ -34,7 +42,7 @@
     setToken(t);
     overlay.hidden = true;
     tokenInput.value = "";
-    connect();
+    bootstrap();
   });
 
   document.getElementById("logout").addEventListener("click", forgetToken);
@@ -42,7 +50,6 @@
     knocks = [];
     render();
   });
-  topicInput.addEventListener("change", connect);
   toInput.addEventListener("change", connect);
 
   function setStatus(live, title) {
@@ -58,12 +65,79 @@
   }
 
   function escapeHTML(s) {
-    return String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  function renderSidebar() {
+    channelList.innerHTML = topics
+      .map((t) => {
+        const active = t === activeTopic ? " active" : "";
+        return `<li class="channel${active}" data-topic="${escapeHTML(t)}">
+          <span class="hash">#</span>${escapeHTML(t)}
+        </li>`;
+      })
+      .join("");
+    for (const li of channelList.querySelectorAll("li.channel")) {
+      li.addEventListener("click", () => selectChannel(li.dataset.topic));
+    }
+  }
+
+  function selectChannel(topic) {
+    if (!topic || topic === activeTopic) return;
+    activeTopic = topic;
+    activeChannelLabel.textContent = topic;
+    renderSidebar();
+    connect();
+  }
+
+  function ensureTopic(topic) {
+    if (!topic) return;
+    if (topics.includes(topic)) return;
+    topics = topics.concat([topic]).sort();
+    renderSidebar();
+  }
+
+  async function fetchTopics() {
+    const token = getToken();
+    if (!token) return;
+    try {
+      const resp = await fetch("/v1/topics", {
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (resp.status === 401) {
+        stopTopicsPoll();
+        promptForToken();
+        return;
+      }
+      if (!resp.ok) return;
+      const list = await resp.json();
+      if (!Array.isArray(list)) return;
+      // A knock may arrive over SSE and be added via ensureTopic() before
+      // the next poll catches up — merge so the sidebar stays consistent.
+      const merged = new Set(list);
+      merged.add(DEFAULT_TOPIC);
+      for (const t of topics) merged.add(t);
+      topics = Array.from(merged).sort();
+      renderSidebar();
+    } catch (err) {
+      console.error("fetch topics failed", err);
+    }
+  }
+
+  function startTopicsPoll() {
+    stopTopicsPoll();
+    topicsPollTimer = setInterval(fetchTopics, TOPICS_POLL_MS);
+  }
+  function stopTopicsPoll() {
+    if (topicsPollTimer) {
+      clearInterval(topicsPollTimer);
+      topicsPollTimer = null;
+    }
   }
 
   function render() {
     if (!knocks.length) {
-      feed.innerHTML = '<div class="empty">no knocks yet</div>';
+      feed.innerHTML = `<div class="empty">no knocks in #${escapeHTML(activeTopic)} yet</div>`;
       return;
     }
     feed.innerHTML = knocks
@@ -102,7 +176,7 @@
 
     const params = new URLSearchParams();
     params.set("token", token);
-    if (topicInput.value.trim()) params.set("topic", topicInput.value.trim());
+    params.set("topic", activeTopic);
     if (toInput.value.trim()) params.set("to", toInput.value.trim());
 
     es = new EventSource("/v1/stream?" + params.toString());
@@ -120,11 +194,20 @@
         const k = JSON.parse(ev.data);
         knocks.push(k);
         if (knocks.length > 500) knocks = knocks.slice(-500);
+        ensureTopic(k.topic);
         render();
       } catch (err) {
         console.error("bad knock payload", err, ev.data);
       }
     });
+  }
+
+  async function bootstrap() {
+    activeChannelLabel.textContent = activeTopic;
+    renderSidebar();
+    await fetchTopics();
+    startTopicsPoll();
+    connect();
   }
 
   // Bookmark shortcut: visiting `/?token=XXX` absorbs the token into
@@ -140,5 +223,5 @@
   }
 
   if (!getToken()) promptForToken();
-  else connect();
+  else bootstrap();
 })();

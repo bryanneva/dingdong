@@ -4,9 +4,15 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"sort"
 	"sync"
 	"time"
 )
+
+// defaultTopic is the channel name used in two places: Topics() always surfaces
+// it so the UI sidebar has a stable anchor even on a fresh server, and
+// handlePostKnock falls back to it when a knock arrives with topic="".
+const defaultTopic = "main"
 
 type Knock struct {
 	ID        string    `json:"id"`
@@ -94,6 +100,27 @@ func (s *Store) List(f Filter, since string, limit int) []Knock {
 			break
 		}
 	}
+	return out
+}
+
+// Topics returns the sorted set of distinct topics observed in the ring
+// buffer, with "main" always included so the UI sidebar has a stable anchor
+// on a fresh server.
+func (s *Store) Topics() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := map[string]struct{}{defaultTopic: {}}
+	for _, k := range s.items {
+		if k.Topic == "" {
+			continue
+		}
+		seen[k.Topic] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for t := range seen {
+		out = append(out, t)
+	}
+	sort.Strings(out)
 	return out
 }
 

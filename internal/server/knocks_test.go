@@ -54,8 +54,8 @@ func TestPostKnock_Defaults(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.Topic != "default" {
-		t.Errorf("Topic=%q, want default (when omitted)", got.Topic)
+	if got.Topic != "main" {
+		t.Errorf("Topic=%q, want main (when omitted)", got.Topic)
 	}
 	if got.Kind != "info" {
 		t.Errorf("Kind=%q, want info (when omitted)", got.Kind)

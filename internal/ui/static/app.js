@@ -69,24 +69,74 @@
   }
 
   function renderSidebar() {
+    channelList.setAttribute("role", "listbox");
+    channelList.setAttribute("aria-label", "Channels");
     channelList.innerHTML = topics
       .map((t) => {
-        const active = t === activeTopic ? " active" : "";
-        return `<li class="channel${active}" data-topic="${escapeHTML(t)}">
+        const isActive = t === activeTopic;
+        const active = isActive ? " active" : "";
+        // Roving tabindex: only the active row is in the tab order; arrow keys
+        // move focus and reassign tabindex=0 so Shift+Tab returns to the row
+        // the user left on.
+        const tabindex = isActive ? "0" : "-1";
+        return `<li class="channel${active}" role="option" data-topic="${escapeHTML(t)}" aria-selected="${isActive}" tabindex="${tabindex}">
           <span class="hash">#</span>${escapeHTML(t)}
         </li>`;
       })
       .join("");
     for (const li of channelList.querySelectorAll("li.channel")) {
       li.addEventListener("click", () => selectChannel(li.dataset.topic));
+      li.addEventListener("keydown", onChannelKeydown);
     }
+  }
+
+  function onChannelKeydown(e) {
+    const items = Array.from(channelList.querySelectorAll("li.channel"));
+    const idx = items.indexOf(e.currentTarget);
+    if (idx < 0 || !items.length) return;
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        focusChannelItem(items[(idx + 1) % items.length]);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        focusChannelItem(items[(idx - 1 + items.length) % items.length]);
+        break;
+      case "Home":
+        e.preventDefault();
+        focusChannelItem(items[0]);
+        break;
+      case "End":
+        e.preventDefault();
+        focusChannelItem(items[items.length - 1]);
+        break;
+      case "Enter":
+      case " ":
+        e.preventDefault();
+        selectChannel(e.currentTarget.dataset.topic);
+        break;
+    }
+  }
+
+  function focusChannelItem(li) {
+    for (const item of channelList.querySelectorAll("li.channel")) {
+      item.tabIndex = -1;
+    }
+    li.tabIndex = 0;
+    li.focus();
   }
 
   function selectChannel(topic) {
     if (!topic || topic === activeTopic) return;
+    const wasFocused = channelList.contains(document.activeElement);
     activeTopic = topic;
     activeChannelLabel.textContent = topic;
     renderSidebar();
+    if (wasFocused) {
+      const newActive = channelList.querySelector("li.channel.active");
+      if (newActive) newActive.focus();
+    }
     connect();
   }
 

@@ -63,7 +63,7 @@ schema — agents adopt naming conventions on top.
 |--------|------------------------------------------|---------------------------------------------|
 | POST   | `/v1/knocks`                             | Publish; server fills `id`/`ts`             |
 | GET    | `/v1/knocks?topic=&to=&since=&limit=`    | Recent knocks (oldest → newest)             |
-| GET    | `/v1/topics`                             | Distinct topics from the ring buffer (always includes `main`) |
+| GET    | `/v1/topics`                             | Distinct topics from the store (always includes `main`) |
 | GET    | `/v1/stream?topic=&to=&since=`           | SSE: backlog then live, with keepalives     |
 | GET    | `/healthz`                               | Liveness                                    |
 | GET    | `/`                                      | Web UI                                      |
@@ -75,6 +75,28 @@ Auth: `Authorization: Bearer <DINGDONG_TOKEN>` on every endpoint, or
 and the web UI absorbs the token into `localStorage` (then strips it from
 the URL bar). The token persists across reloads and browser restarts.
 "forget token" in the header clears it.
+
+## Persistence
+
+Knocks are stored in a SQLite file (pure-Go `modernc.org/sqlite`, WAL mode,
+`synchronous=NORMAL`). The path is set with `--db-path`; the k8s manifests
+mount a PVC at `/data` and point the flag at `/data/dingdong.db`. History
+survives pod restarts.
+
+Retention is count-based — the newest `--retention-rows` (default 100,000)
+are kept, and an hourly background loop deletes older rows. For dingdong's
+homelab traffic profile that's roughly a hundred days of normal activity.
+Adjust the flag if your traffic is heavier or you want a tighter disk bound.
+
+Leaving `--db-path` empty falls back to an in-memory ring buffer
+(`--capacity` rows, default 1000) — handy for local development and tests
+where you don't need durability.
+
+**Rollback story:** revert the image bump as described under
+[Rollback](#rollback). The PVC keeps the existing DB file untouched, so a
+freshly-rolled-out pod resumes against the same history. To start clean,
+delete the PVC (`kubectl -n dingdong delete pvc dingdong-data`) before the
+next rollout — Recreate strategy ensures no overlap.
 
 ## Deploy
 

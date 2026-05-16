@@ -6,7 +6,9 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    type: Recreate  # in-memory state; rolling update would split traffic across two empty buffers
+    # SQLite is single-writer; two pods sharing the same DB file is undefined.
+    # Recreate ensures only one pod ever has the PVC mounted at a time.
+    type: Recreate
   selector:
     matchLabels:
       app: dingdong
@@ -22,7 +24,10 @@ spec:
           # ImagePullBackOff until the first successful CI run lands on main.
           image: ghcr.io/bryanneva/dingdong:bootstrap
           imagePullPolicy: IfNotPresent
-          args: ["--addr=:8080", "--capacity=1000"]
+          args:
+            - "--addr=:8080"
+            - "--db-path=/data/dingdong.db"
+            - "--retention-rows=100000"
           env:
             - name: DINGDONG_TOKEN
               valueFrom:
@@ -54,3 +59,10 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: dingdong-data

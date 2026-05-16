@@ -44,6 +44,16 @@ CREATE INDEX IF NOT EXISTS idx_knocks_topic_id ON knocks(topic, id);
 // plenty for a service with at most ~100 knocks/min peak.
 const trimInterval = 1 * time.Hour
 
+// NewSQLiteStore opens (or creates) a SQLite database at path and returns
+// a Store wrapping it. Used by main.go to wire production durability.
+func NewSQLiteStore(path string, retentionRows int) (*Store, error) {
+	b, err := newSQLiteBackend(path, retentionRows)
+	if err != nil {
+		return nil, err
+	}
+	return NewStore(b), nil
+}
+
 func newSQLiteBackend(path string, retentionRows int) (*sqliteBackend, error) {
 	if retentionRows <= 0 {
 		retentionRows = 100000

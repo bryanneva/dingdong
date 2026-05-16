@@ -18,6 +18,9 @@ deploy/k8s/secret.yaml
 # Harness session state (not source)
 .context/
 
+# Playwright MCP scratch — accessibility snapshots written alongside captures
+.playwright-mcp/
+
 # Go cruft
 *.test
 *.out

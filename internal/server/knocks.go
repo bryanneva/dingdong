@@ -41,6 +41,7 @@ func (s *Server) handlePostKnock(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "store unavailable", http.StatusInternalServerError)
 		return
 	}
+	s.fanOutWebhooks(k)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(k)
 }

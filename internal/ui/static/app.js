@@ -11,6 +11,7 @@
   const overlay = document.getElementById("auth-overlay");
   const tokenInput = document.getElementById("token-input");
   const authForm = document.getElementById("auth-form");
+  const webhookList = document.getElementById("webhook-list");
 
   let es = null;
   let knocks = [];
@@ -176,12 +177,52 @@
 
   function startTopicsPoll() {
     stopTopicsPoll();
-    topicsPollTimer = setInterval(fetchTopics, TOPICS_POLL_MS);
+    topicsPollTimer = setInterval(() => {
+      fetchTopics();
+      fetchWebhooks();
+    }, TOPICS_POLL_MS);
   }
   function stopTopicsPoll() {
     if (topicsPollTimer) {
       clearInterval(topicsPollTimer);
       topicsPollTimer = null;
+    }
+  }
+
+  function renderWebhooks(list) {
+    if (!list.length) {
+      webhookList.innerHTML = `<div class="webhook empty-hint">no subscribers</div>`;
+      return;
+    }
+    webhookList.innerHTML = list
+      .map((w) => {
+        const topic = w.topic ? `<span class="topic">#${escapeHTML(w.topic)}</span>` : `<span class="topic">all topics</span>`;
+        return `<div class="webhook" title="id: ${escapeHTML(w.id)}">
+          ${topic}
+          <span class="url">${escapeHTML(w.url)}</span>
+        </div>`;
+      })
+      .join("");
+  }
+
+  async function fetchWebhooks() {
+    const token = getToken();
+    if (!token) return;
+    try {
+      const resp = await fetch("/v1/webhooks", {
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (resp.status === 401) {
+        stopTopicsPoll();
+        promptForToken();
+        return;
+      }
+      if (!resp.ok) return;
+      const list = await resp.json();
+      if (!Array.isArray(list)) return;
+      renderWebhooks(list);
+    } catch (err) {
+      console.error("fetch webhooks failed", err);
     }
   }
 
@@ -256,6 +297,7 @@
     activeChannelLabel.textContent = activeTopic;
     renderSidebar();
     await fetchTopics();
+    await fetchWebhooks();
     startTopicsPoll();
     connect();
   }

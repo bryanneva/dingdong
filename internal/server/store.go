@@ -62,9 +62,10 @@ type subscription struct {
 // events in the same order they're persisted, and so a concurrent cancel()
 // cannot close a subscriber channel between snapshot and send.
 type Store struct {
-	mu      sync.Mutex
-	subs    map[*subscription]struct{}
-	backend Backend
+	mu       sync.Mutex
+	subs     map[*subscription]struct{}
+	backend  Backend
+	webhooks []Webhook
 }
 
 func NewStore(backend Backend) *Store {

@@ -14,4 +14,4 @@ resources:
 # the result back. See README "Deploy" for the loop.
 images:
   - name: ghcr.io/bryanneva/dingdong
-    newTag: main-f2ce8bf
+    newTag: main-08b0eb5

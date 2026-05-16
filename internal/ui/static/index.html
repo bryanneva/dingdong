@@ -10,10 +10,13 @@
         color-scheme: light dark;
         --bg: #0e0f12;
         --panel: #181a20;
+        --panel-2: #14161c;
         --border: #2a2d36;
         --text: #e6e8ee;
         --muted: #9aa2b1;
         --accent: #ffb84d;
+        --selected-bg: #2a2d36;
+        --hover-bg: #20222a;
         --kind-knock: #ffb84d;
         --kind-ready: #6ddf7e;
         --kind-need: #ff7d7d;
@@ -33,6 +36,12 @@
         background: var(--panel);
       }
       header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+      header .channel-name {
+        font-size: 14px; color: var(--muted); font-weight: 500;
+        padding-left: 8px; border-left: 1px solid var(--border);
+      }
+      header .channel-name strong { color: var(--text); }
+      header .spacer { flex: 1; }
       header .dot {
         display: inline-block; width: 8px; height: 8px; border-radius: 50%;
         background: var(--muted);
@@ -41,7 +50,7 @@
       header input[type="text"] {
         padding: 6px 10px; border-radius: 6px;
         border: 1px solid var(--border); background: #0b0c10; color: var(--text);
-        font: inherit; min-width: 200px;
+        font: inherit; min-width: 160px;
       }
       header label { color: var(--muted); font-size: 12px; }
       header button {
@@ -50,9 +59,41 @@
         cursor: pointer; font: inherit;
       }
       header button:hover { border-color: var(--accent); color: var(--accent); }
-      main {
-        flex: 1; overflow: auto; padding: 12px 16px;
-        display: flex; flex-direction: column; gap: 8px;
+
+      .layout {
+        flex: 1; display: flex; min-height: 0;
+      }
+      aside#sidebar {
+        width: 220px; flex-shrink: 0;
+        background: var(--panel-2);
+        border-right: 1px solid var(--border);
+        display: flex; flex-direction: column;
+        overflow-y: auto;
+      }
+      aside#sidebar .sidebar-header {
+        padding: 12px 16px 6px;
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+        color: var(--muted); font-weight: 600;
+      }
+      aside#sidebar ul {
+        list-style: none; padding: 0; margin: 0;
+      }
+      aside#sidebar li {
+        padding: 6px 16px;
+        cursor: pointer; user-select: none;
+        color: var(--text);
+        display: flex; align-items: center; gap: 6px;
+      }
+      aside#sidebar li:hover { background: var(--hover-bg); }
+      aside#sidebar li.active {
+        background: var(--selected-bg); color: var(--accent); font-weight: 600;
+      }
+      aside#sidebar li .hash { color: var(--muted); }
+      aside#sidebar li.active .hash { color: var(--accent); }
+
+      main#feed {
+        flex: 1; overflow-y: auto; padding: 12px 16px;
+        display: flex; flex-direction: column; gap: 8px; min-width: 0;
       }
       .knock {
         padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
@@ -102,14 +143,20 @@
     <header>
       <span class="dot" id="status-dot" title="disconnected"></span>
       <h1>dingdong</h1>
-      <label for="topic">topic</label>
-      <input id="topic" type="text" placeholder="(all topics)" />
+      <span class="channel-name">#<strong id="active-channel">main</strong></span>
+      <span class="spacer"></span>
       <label for="to">to</label>
       <input id="to" type="text" placeholder="(any recipient)" />
       <button id="clear">clear</button>
       <button id="logout">forget token</button>
     </header>
-    <main id="feed"><div class="empty">connecting…</div></main>
+    <div class="layout">
+      <aside id="sidebar">
+        <div class="sidebar-header">Channels</div>
+        <ul id="channel-list"></ul>
+      </aside>
+      <main id="feed"><div class="empty">connecting…</div></main>
+    </div>
     <div class="auth-overlay" id="auth-overlay" hidden>
       <form id="auth-form">
         <h2>enter dingdong token</h2>

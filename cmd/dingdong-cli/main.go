@@ -210,6 +210,27 @@ func (e *permanentErr) Unwrap() error { return e.err }
 
 var tailRetryDelays = []time.Duration{1 * time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second}
 
+// knockStreamer abstracts the SSE consumer so tailLoop can be exercised in
+// tests without an HTTP server. The production implementation is
+// httpStreamer, which delegates to streamKnocks.
+type knockStreamer interface {
+	Stream(ctx context.Context, cfg config, topic, to, since string, onKnock func(knock) bool) error
+}
+
+type httpStreamer struct{}
+
+func (httpStreamer) Stream(ctx context.Context, cfg config, topic, to, since string, onKnock func(knock) bool) error {
+	return streamKnocks(ctx, cfg, topic, to, since, onKnock)
+}
+
+// tailOpts configures tailLoop's retry behavior and I/O sinks. Zero values
+// fall back to production defaults (tailRetryDelays, os.Stderr).
+type tailOpts struct {
+	Delays  []time.Duration
+	NoRetry bool
+	ErrW    io.Writer
+}
+
 func runTail(cfg config, args []string) error {
 	fs := flag.NewFlagSet("tail", flag.ContinueOnError)
 	topic := fs.String("topic", "", "topic filter")
@@ -223,12 +244,29 @@ func runTail(cfg config, args []string) error {
 	ctx, cancel := signalContext()
 	defer cancel()
 
-	enc := json.NewEncoder(os.Stdout)
-	lastSeen := *since
+	return tailLoop(ctx, httpStreamer{}, cfg, *topic, *to, *since, os.Stdout, tailOpts{NoRetry: *noRetry})
+}
+
+// tailLoop runs the production retry loop: stream knocks, write them to w,
+// reconnect on transient drops with the last-seen id as since, and stop on
+// context cancellation, permanent errors, or NoRetry. It is the single
+// implementation shared by runTail and tests.
+func tailLoop(ctx context.Context, s knockStreamer, cfg config, topic, to, since string, w io.Writer, opts tailOpts) error {
+	delays := opts.Delays
+	if len(delays) == 0 {
+		delays = tailRetryDelays
+	}
+	errW := opts.ErrW
+	if errW == nil {
+		errW = os.Stderr
+	}
+
+	enc := json.NewEncoder(w)
+	lastSeen := since
 	attempt := 0
 
 	for {
-		err := streamKnocks(ctx, cfg, *topic, *to, lastSeen, func(k knock) bool {
+		err := s.Stream(ctx, cfg, topic, to, lastSeen, func(k knock) bool {
 			if k.ID != "" {
 				lastSeen = k.ID
 			}
@@ -236,7 +274,6 @@ func runTail(cfg config, args []string) error {
 			return true
 		})
 
-		// Context cancellation (SIGINT/SIGTERM) — stop cleanly.
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil
 		}
@@ -246,18 +283,17 @@ func runTail(cfg config, args []string) error {
 			return err
 		}
 
-		// --no-retry: exit immediately (nil = clean EOF, non-nil = error).
-		if *noRetry {
+		if opts.NoRetry {
 			return err
 		}
 
-		delay := tailRetryDelays[min(attempt, len(tailRetryDelays)-1)]
+		delay := delays[min(attempt, len(delays)-1)]
 		attempt++
 		reason := "EOF"
 		if err != nil {
 			reason = err.Error()
 		}
-		fmt.Fprintf(os.Stderr, "dingdong tail: connection dropped (%s); reconnecting in %v\n", reason, delay)
+		_, _ = fmt.Fprintf(errW, "dingdong tail: connection dropped (%s); reconnecting in %v\n", reason, delay)
 
 		select {
 		case <-time.After(delay):

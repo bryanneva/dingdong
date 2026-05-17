@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,138 @@ import (
 	"testing"
 	"time"
 )
+
+// streamerFunc adapts an ordinary function to the knockStreamer interface so
+// tests can drive tailLoop without an HTTP server.
+type streamerFunc func(ctx context.Context, cfg config, topic, to, since string, onKnock func(knock) bool) error
+
+func (f streamerFunc) Stream(ctx context.Context, cfg config, topic, to, since string, onKnock func(knock) bool) error {
+	return f(ctx, cfg, topic, to, since, onKnock)
+}
+
+// TestTailLoopReconnectsWithSince exercises the production tailLoop retry
+// path directly via a fake knockStreamer. It asserts that after the first
+// connection ends (clean EOF), tailLoop reconnects and passes the last-seen
+// knock id as the since parameter. This is the genuine regression detector
+// for issue #40 — earlier tests mirrored the loop inline instead of calling
+// the production function, so a regression in the real loop could ship
+// undetected.
+func TestTailLoopReconnectsWithSince(t *testing.T) {
+	var calls atomic.Int32
+	sinceCh := make(chan string, 4)
+
+	streamer := streamerFunc(func(ctx context.Context, _ config, topic, _, since string, onKnock func(knock) bool) error {
+		n := calls.Add(1)
+		select {
+		case sinceCh <- since:
+		default:
+		}
+		switch n {
+		case 1:
+			// First connection: deliver id001, then clean EOF triggers reconnect.
+			onKnock(knock{ID: "id001", Topic: topic, Kind: "info"})
+			return nil
+		case 2:
+			// Second connection: deliver id002, then block until ctx is cancelled.
+			onKnock(knock{ID: "id002", Topic: topic, Kind: "info"})
+			<-ctx.Done()
+			return ctx.Err()
+		default:
+			<-ctx.Done()
+			return ctx.Err()
+		}
+	})
+
+	var out bytes.Buffer
+	cfg := config{URL: "http://example.invalid", Token: "tok"}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- tailLoop(ctx, streamer, cfg, "t", "", "", &out, tailOpts{
+			Delays: []time.Duration{1 * time.Millisecond},
+			ErrW:   io.Discard,
+		})
+	}()
+
+	var firstSince, secondSince string
+	select {
+	case firstSince = <-sinceCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first call to streamer")
+	}
+	select {
+	case secondSince = <-sinceCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for reconnect")
+	}
+
+	if firstSince != "" {
+		t.Errorf("first call since=%q, want empty", firstSince)
+	}
+	if secondSince != "id001" {
+		t.Errorf("reconnect since=%q, want id001", secondSince)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("tailLoop returned %v, want nil on ctx cancel", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("tailLoop did not return after ctx cancel")
+	}
+
+	body := out.String()
+	if !strings.Contains(body, `"id":"id001"`) || !strings.Contains(body, `"id":"id002"`) {
+		t.Errorf("writer output missing knocks; got: %q", body)
+	}
+}
+
+// TestTailLoopNoRetryStopsOnFirstDrop verifies tailOpts.NoRetry causes the
+// loop to return after one stream attempt rather than reconnecting.
+func TestTailLoopNoRetryStopsOnFirstDrop(t *testing.T) {
+	var calls atomic.Int32
+	streamer := streamerFunc(func(_ context.Context, _ config, _, _, _ string, _ func(knock) bool) error {
+		calls.Add(1)
+		return nil // clean EOF
+	})
+
+	err := tailLoop(context.Background(), streamer, config{Token: "tok"}, "t", "", "", io.Discard, tailOpts{
+		NoRetry: true,
+		ErrW:    io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("tailLoop returned %v, want nil", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("streamer called %d times, want 1 (NoRetry)", got)
+	}
+}
+
+// TestTailLoopPermanentErrorReturns verifies a permanentErr from the
+// streamer propagates out of tailLoop without retry.
+func TestTailLoopPermanentErrorReturns(t *testing.T) {
+	var calls atomic.Int32
+	streamer := streamerFunc(func(_ context.Context, _ config, _, _, _ string, _ func(knock) bool) error {
+		calls.Add(1)
+		return &permanentErr{errors.New("401")}
+	})
+
+	err := tailLoop(context.Background(), streamer, config{Token: "tok"}, "t", "", "", io.Discard, tailOpts{
+		Delays: []time.Duration{time.Millisecond},
+		ErrW:   io.Discard,
+	})
+	var perm *permanentErr
+	if !errors.As(err, &perm) {
+		t.Fatalf("tailLoop returned %T %v, want *permanentErr", err, err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("streamer called %d times, want 1 (no retry on permanent)", got)
+	}
+}
 
 // sseEvent formats a single SSE knock event frame.
 func sseEvent(k knock) string {

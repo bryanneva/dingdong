@@ -4,6 +4,7 @@ import {
   loadAppScript,
   mockTopicsResponse,
   mockTopicsStatus,
+  mockWebhooksResponse,
   resetEnvironment,
 } from "./helpers.js";
 
@@ -34,6 +35,7 @@ async function waitForBootstrap() {
 describe("app.js channel + SSE + auth behavior", () => {
   it("clicking a channel updates activeTopic, re-renders, and reconnects", async () => {
     mockTopicsResponse(["main", "ops"]);
+    mockWebhooksResponse([]);
     loadAppScript();
     await waitForBootstrap();
 
@@ -61,6 +63,7 @@ describe("app.js channel + SSE + auth behavior", () => {
 
   it("incoming SSE knock on a new topic adds it to the sidebar via ensureTopic", async () => {
     mockTopicsResponse(["main"]);
+    mockWebhooksResponse([]);
     loadAppScript();
     await waitForBootstrap();
 
@@ -90,14 +93,16 @@ describe("app.js channel + SSE + auth behavior", () => {
       (li) => li.dataset.topic,
     );
     expect(sidebarAfter).toContain("alerts");
-    // fetch was only called once (for the initial bootstrap), proving the
-    // sidebar update did not require another /v1/topics roundtrip.
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    // fetch was only called for the initial bootstrap (one /v1/topics +
+    // one /v1/webhooks), proving the sidebar update did not require another
+    // /v1/topics roundtrip.
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
   it("/v1/topics returning 401 stops the poll and shows the auth overlay", async () => {
     // First call (bootstrap) succeeds so the poll starts.
     mockTopicsResponse(["main"]);
+    mockWebhooksResponse([]);
     loadAppScript();
     await waitForBootstrap();
 

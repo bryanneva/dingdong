@@ -3,6 +3,7 @@ package server
 import (
 	"io/fs"
 	"net/http"
+	"sync"
 
 	"github.com/bryanneva/dingdong/internal/ui"
 )
@@ -19,9 +20,11 @@ type Config struct {
 }
 
 type Server struct {
-	cfg   Config
-	store *Store
-	mux   *http.ServeMux
+	cfg        Config
+	store      *Store
+	mux        *http.ServeMux
+	dispatcher *Dispatcher
+	deliveryWG sync.WaitGroup
 }
 
 func New(cfg Config) *Server {
@@ -32,9 +35,10 @@ func New(cfg Config) *Server {
 		cfg.Store = NewMemStore(cfg.Cap)
 	}
 	s := &Server{
-		cfg:   cfg,
-		store: cfg.Store,
-		mux:   http.NewServeMux(),
+		cfg:        cfg,
+		store:      cfg.Store,
+		mux:        http.NewServeMux(),
+		dispatcher: NewDispatcher(),
 	}
 	s.routes()
 	return s
@@ -60,6 +64,10 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /v1/knocks", s.requireAuth(http.HandlerFunc(s.handleListKnocks)))
 	s.mux.Handle("GET /v1/topics", s.requireAuth(http.HandlerFunc(s.handleListTopics)))
 	s.mux.Handle("GET /v1/stream", s.requireAuth(http.HandlerFunc(s.handleStream)))
+
+	s.mux.Handle("POST /v1/webhooks", s.requireAuth(http.HandlerFunc(s.handleCreateWebhook)))
+	s.mux.Handle("GET /v1/webhooks", s.requireAuth(http.HandlerFunc(s.handleListWebhooks)))
+	s.mux.Handle("DELETE /v1/webhooks/{id}", s.requireAuth(http.HandlerFunc(s.handleDeleteWebhook)))
 
 	// Static assets are served unauthenticated so the browser can load the HTML
 	// + JS that prompts for a token. The bytes themselves contain no secrets;

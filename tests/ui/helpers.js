@@ -21,7 +21,10 @@ const BODY_HTML = `
     <button id="clear">clear</button>
     <button id="logout">forget token</button>
   </header>
-  <aside id="sidebar"><ul id="channel-list"></ul></aside>
+  <aside id="sidebar">
+    <ul id="channel-list"></ul>
+    <div id="webhook-list"></div>
+  </aside>
   <main id="feed"></main>
   <div class="auth-overlay" id="auth-overlay" hidden>
     <form id="auth-form">
@@ -93,5 +96,13 @@ export function mockTopicsStatus(status) {
     status,
     ok: status >= 200 && status < 300,
     json: async () => ({}),
+  });
+}
+
+export function mockWebhooksResponse(list) {
+  globalThis.fetch.mockResolvedValueOnce({
+    status: 200,
+    ok: true,
+    json: async () => list,
   });
 }

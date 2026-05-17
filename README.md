@@ -77,6 +77,9 @@ schema — agents adopt naming conventions on top.
 | GET    | `/v1/knocks?topic=&to=&since=&limit=`    | Recent knocks (oldest → newest)             |
 | GET    | `/v1/topics`                             | Distinct topics from the store (always includes `main`) |
 | GET    | `/v1/stream?topic=&to=&since=`           | SSE: backlog then live, with keepalives     |
+| POST   | `/v1/webhooks`                           | Register a webhook subscriber               |
+| GET    | `/v1/webhooks`                           | List registered subscribers (secrets redacted) |
+| DELETE | `/v1/webhooks/{id}`                      | Remove a webhook subscriber                 |
 | GET    | `/healthz`                               | Liveness                                    |
 | GET    | `/`                                      | Web UI                                      |
 
@@ -109,6 +112,111 @@ where you don't need durability.
 freshly-rolled-out pod resumes against the same history. To start clean,
 delete the PVC (`kubectl -n dingdong delete pvc dingdong-data`) before the
 next rollout — Recreate strategy ensures no overlap.
+
+## Webhooks
+
+A webhook subscriber registers an HTTP(S) URL that dingdong will POST every
+matching knock to as soon as it lands. The delivery shape is intentionally
+compatible with [GitHub's webhook signing scheme](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries)
+so consumers (including Hermes' webhook validator) can reuse standard
+verification code.
+
+### Register
+
+```sh
+curl -X POST "$DINGDONG_URL/v1/webhooks" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://your-listener.example/hook","topic":"ops"}'
+```
+
+Response (`201 Created`):
+
+```json
+{
+  "id": "0123456789abcdef...",
+  "url": "https://your-listener.example/hook",
+  "topic": "ops",
+  "secret": "<64 hex chars>",
+  "created_at": "2026-05-16T10:00:00Z"
+}
+```
+
+- `topic` is optional. Omit for a wildcard subscription that receives every
+  knock regardless of channel.
+- `secret` is optional on register. If you don't supply one, the server
+  generates a 32-byte random secret and returns it ONCE in the response —
+  store it on your side, you can't retrieve it later.
+- The body cap is 8 KiB; registrations are tiny.
+
+### List
+
+```sh
+curl -H "Authorization: Bearer <token>" "$DINGDONG_URL/v1/webhooks"
+```
+
+Returns the array of subscribers with `secret` redacted. The dashboard reads
+this every 15s and surfaces it in the sidebar.
+
+### Delete
+
+```sh
+curl -X DELETE \
+  -H "Authorization: Bearer <token>" \
+  "$DINGDONG_URL/v1/webhooks/<id>"
+```
+
+Returns `204 No Content`. Deletions take effect immediately — knocks posted
+after the delete will not fan out to the removed subscriber.
+
+### Delivery shape
+
+For each matching knock, dingdong POSTs the knock JSON to the subscriber URL
+with these headers:
+
+| Header | Value |
+|--------|-------|
+| `Content-Type` | `application/json` |
+| `User-Agent` | `dingdong-webhook/1` |
+| `X-Hub-Signature-256` | `sha256=<hex>` — HMAC-SHA256 over the raw body keyed by the subscriber's secret |
+| `X-Dingdong-Webhook-Id` | The subscriber id, for log correlation |
+| `X-Dingdong-Knock-Id` | The knock id, for log correlation + de-dup |
+| `X-Dingdong-Topic` | The knock's topic |
+| `X-Dingdong-Delivery-Attempt` | 1-based attempt counter for retries |
+
+Verifying the signature on the receiving side, in Go:
+
+```go
+mac := hmac.New(sha256.New, []byte(secret))
+mac.Write(body)
+want := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+ok := hmac.Equal([]byte(r.Header.Get("X-Hub-Signature-256")), []byte(want))
+```
+
+### Retry / backoff
+
+Dingdong retries with exponential backoff (1s, 2s, 4s) for up to 4 attempts
+total. Retry is triggered on transport errors, HTTP 5xx, and HTTP 429.
+Other 4xx statuses (400-499 except 429) are treated as subscriber config
+bugs and not retried — the delivery is dropped.
+
+### MVP caveats
+
+- **No persistence.** Webhook subscribers live in memory on the server
+  (separate from the SQLite-backed knock history). A pod restart clears all
+  registrations; clients must re-register on startup, and any retries in
+  flight at the time of restart are lost.
+- **No dead-letter / inspection.** A failed delivery is logged (eventually
+  — currently just dropped). There is no API to list failed deliveries.
+- **No per-subscriber concurrency limit.** A slow subscriber will not block
+  others — each delivery runs on its own goroutine — but a very large
+  number of failing subscribers can stack up goroutines until backoff
+  clears.
+- **Single-replica only.** The fan-out is in-process; running multiple
+  replicas would deliver each knock once per replica.
+
+Persistence + retry queue are tracked under [#53](https://github.com/bryanneva/dingdong/issues/53);
+when that lands, restart semantics get cleaned up alongside it.
 
 ## Deploy
 

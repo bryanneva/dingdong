@@ -9,7 +9,13 @@ import (
 
 type Config struct {
 	Token string
-	Cap   int
+	// Cap controls the in-memory ring-buffer fallback when Store is nil.
+	// Ignored when Store is set. Defaults to 1000 if both are zero.
+	Cap int
+	// Store is the composite of a Backend + the live subscriber hub. When nil,
+	// New constructs a memBackend-backed Store with capacity Cap — useful for
+	// tests and local development. Production callers pass a durable Store.
+	Store *Store
 }
 
 type Server struct {
@@ -19,16 +25,25 @@ type Server struct {
 }
 
 func New(cfg Config) *Server {
-	if cfg.Cap <= 0 {
-		cfg.Cap = 1000
+	if cfg.Store == nil {
+		if cfg.Cap <= 0 {
+			cfg.Cap = 1000
+		}
+		cfg.Store = NewMemStore(cfg.Cap)
 	}
 	s := &Server{
 		cfg:   cfg,
-		store: NewStore(cfg.Cap),
+		store: cfg.Store,
 		mux:   http.NewServeMux(),
 	}
 	s.routes()
 	return s
+}
+
+// Close releases the underlying store so the durable backend can flush and
+// any live SSE subscribers unblock.
+func (s *Server) Close() error {
+	return s.store.Close()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

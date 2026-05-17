@@ -34,7 +34,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	ch, cancel := s.store.Subscribe()
 	defer cancel()
 
-	for _, k := range s.store.List(f, since, 1000) {
+	backlog, err := s.store.List(f, since, 1000)
+	if err != nil {
+		// Backend is unavailable; close the stream and let the client retry.
+		return
+	}
+	for _, k := range backlog {
 		writeSSE(w, k)
 		since = k.ID
 	}

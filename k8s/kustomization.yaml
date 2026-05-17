@@ -6,6 +6,7 @@ kind: Kustomization
 # directory.
 resources:
   - dingdong-secret.yaml
+  - pvc.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml

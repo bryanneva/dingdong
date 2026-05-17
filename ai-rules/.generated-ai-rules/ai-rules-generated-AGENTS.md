@@ -28,8 +28,11 @@ Dockerfile, Makefile          multi-stage build, distroless runtime
 
 - One namespace of free-form `topic` strings. Agents post `Knock` records,
   subscribers receive them filtered by `topic` and/or `to`.
-- The server is stateless except for an in-memory ring buffer (last `--capacity`
-  knocks, default 1000). Restart wipes it. That's intentional for the MVP.
+- `Store` is a thin composite: an in-memory subscriber hub for live SSE
+  fan-out plus a `Backend` for durable history. Two backends exist —
+  `sqliteBackend` (production, persisted at `--db-path`) and `memBackend`
+  (tests and local dev, ring-buffer of `--capacity` knocks). When
+  `--db-path` is unset, the server falls back to mem.
 - IDs are 28-char hex, lex-sortable by time. `since` filters use `id > since`.
 - Auth is one shared bearer token from `DINGDONG_TOKEN`. The UI accepts it via
   `?token=` (sessionStorage) since `EventSource` can't set custom headers.
@@ -263,7 +266,57 @@ the machine are unaffected.
 The hook source files live in `.claude/hooks/` (source-controlled); entries
 in the resolved hooks directory are symlinks and are not tracked by git.
 
+## Persistence
+
+Production runs with `--db-path=/data/dingdong.db` against a PVC (see
+`k8s/pvc.yaml`). The driver is `modernc.org/sqlite` (pure-Go, CGO_ENABLED=0
+keeps working against the distroless image). PRAGMAs at open: `journal_mode=WAL`,
+`synchronous=NORMAL`, `busy_timeout=5000`. The connection pool is capped at 1
+because SQLite is single-writer; WAL still lets readers go in parallel through
+the same pooled conn.
+
+**Schema** (single table, idempotent CREATE):
+
+```sql
+CREATE TABLE IF NOT EXISTS knocks (
+    id TEXT PRIMARY KEY,
+    ts INTEGER NOT NULL,                  -- unix nanos
+    from_id TEXT NOT NULL,                -- column renamed; JSON tag stays "from"
+    to_id TEXT NOT NULL DEFAULT '',       -- column renamed; JSON tag stays "to"
+    topic TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    subject TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    in_reply_to TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_knocks_topic_id ON knocks(topic, id);
+```
+
+`from` and `to` are SQL keywords; the rename to `from_id`/`to_id` dodges the
+portability footgun. The JSON wire format on `Knock` is unchanged.
+
+**Retention** is count-based — newest `--retention-rows` (default 100,000) are
+kept. The trim runs in a background goroutine on a 1-hour ticker via
+`DELETE FROM knocks WHERE id NOT IN (SELECT id FROM knocks ORDER BY id DESC LIMIT ?)`.
+The same SQL is reachable as `sqliteBackend.trim()` so tests can drive it
+synchronously. Hourly cadence is plenty for homelab traffic; tighten if you
+need a stricter disk bound.
+
+**Rollback** is the standard image-bump revert (README §Rollback). The PVC
+keeps the DB file untouched across rollbacks, so a fresh pod resumes against
+the existing history. To start clean: delete the PVC before the next rollout
+(`kubectl -n dingdong delete pvc dingdong-data`). Recreate strategy ensures
+no two-pod overlap during the rollover.
+
+**Backups** are out of scope for the binary — volume-level snapshots are
+homelab-cluster ops. If you need them, snapshot `dingdong-data` directly
+via VolumeSnapshot.
+
+**Local dev** without `--db-path` falls back to the memBackend ring buffer
+(capacity `--capacity`, default 1000). Convenient for quick iteration; not
+durable.
+
 ## What the MVP deliberately leaves out
 
-Short list: SQLite persistence, per-agent identity, MCP server, ACLs, mobile
-push, threading UI. Add them only when the bare protocol clearly needs them.
+Short list: per-agent identity, MCP server, ACLs, mobile push, threading UI.
+Add them only when the bare protocol clearly needs them.

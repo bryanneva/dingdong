@@ -231,6 +231,19 @@ type tailOpts struct {
 	ErrW    io.Writer
 }
 
+// nextTailDelay returns the backoff delay for the current drop and the
+// updated attempt counter. When the just-dropped connection emitted at least
+// one event, the counter is reset to 0 first — a successful reconnect is
+// evidence that the server is reachable, so the next drop should start over
+// at the shortest delay instead of inheriting a capped backoff.
+func nextTailDelay(delays []time.Duration, attempt int, gotEvent bool) (delay time.Duration, next int) {
+	if gotEvent {
+		attempt = 0
+	}
+	delay = delays[min(attempt, len(delays)-1)]
+	return delay, attempt + 1
+}
+
 func runTail(cfg config, args []string) error {
 	fs := flag.NewFlagSet("tail", flag.ContinueOnError)
 	topic := fs.String("topic", "", "topic filter")
@@ -266,7 +279,9 @@ func tailLoop(ctx context.Context, s knockStreamer, cfg config, topic, to, since
 	attempt := 0
 
 	for {
+		gotEvent := false
 		err := s.Stream(ctx, cfg, topic, to, lastSeen, func(k knock) bool {
+			gotEvent = true
 			if k.ID != "" {
 				lastSeen = k.ID
 			}
@@ -287,8 +302,8 @@ func tailLoop(ctx context.Context, s knockStreamer, cfg config, topic, to, since
 			return err
 		}
 
-		delay := delays[min(attempt, len(delays)-1)]
-		attempt++
+		var delay time.Duration
+		delay, attempt = nextTailDelay(delays, attempt, gotEvent)
 		reason := "EOF"
 		if err != nil {
 			reason = err.Error()

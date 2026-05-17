@@ -243,8 +243,11 @@ direct-CLI commits (rare but possible), run once after a fresh clone:
 make install-hooks
 ```
 
-This sets `core.hooksPath = .git/hooks` locally and symlinks three scripts
-from `.claude/hooks/` into `.git/hooks/`:
+This resolves the per-checkout hooks directory via
+`git rev-parse --absolute-git-dir` (so it works in both regular clones and
+`git worktree add` checkouts, where `.git` is a gitfile rather than a
+directory), sets `core.hooksPath` to that absolute path locally, and
+symlinks three scripts from `.claude/hooks/` into it:
 
 | Hook | Purpose |
 |------|---------|
@@ -260,8 +263,8 @@ override `core.hooksPath` for this repo only, and the per-repo
 `prepare-commit-msg` inlines the `Closes #N` logic directly. Other repos on
 the machine are unaffected.
 
-The hook source files live in `.claude/hooks/` (source-controlled); `.git/hooks/`
-entries are symlinks and are not tracked by git.
+The hook source files live in `.claude/hooks/` (source-controlled); entries
+in the resolved hooks directory are symlinks and are not tracked by git.
 
 ## What the MVP deliberately leaves out
 

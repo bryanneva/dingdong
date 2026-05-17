@@ -61,18 +61,26 @@ clean:
 	rm -rf bin/
 
 # Wire the public-safety scanner and Closes-#N trailer as real git hooks.
-# Sets core.hooksPath = .git/hooks (local to this repo) so our hooks run on
-# direct-CLI commits without touching the global ~/.git-hooks/ setup.
-# The global prepare-commit-msg delegation step is replaced by an inlined
-# per-repo script (.claude/hooks/prepare-commit-msg) to avoid infinite
-# recursion (see CLAUDE.md § Git Hooks).
+# Sets core.hooksPath to the per-checkout hooks dir (resolved via
+# `git rev-parse --absolute-git-dir` so it works in both regular clones and
+# git worktrees, where `.git` is a gitfile rather than a directory) so our
+# hooks run on direct-CLI commits without touching the global
+# ~/.git-hooks/ setup. The global prepare-commit-msg delegation step is
+# replaced by an inlined per-repo script (.claude/hooks/prepare-commit-msg)
+# to avoid infinite recursion (see CLAUDE.md § Git Hooks).
+#
+# `set -e` is required: a failed ln (e.g. when the hooks dir doesn't exist
+# or a target is occupied by a non-symlink) must abort the recipe instead
+# of being swallowed and leaving core.hooksPath pointing at an empty dir.
 install-hooks:
-	@echo "--- Installing git hooks ---"
-	@git config core.hooksPath .git/hooks
-	@for hook in pre-commit pre-push prepare-commit-msg; do \
-	  src="../../.claude/hooks/$$hook"; \
-	  target=".git/hooks/$$hook"; \
-	  ln -sf "$$src" "$$target"; \
-	  echo "  $$target -> $$src"; \
-	done
-	@echo "OK: hooks installed (core.hooksPath = .git/hooks)."
+	@set -e; \
+	echo "--- Installing git hooks ---"; \
+	hooks_dir="$$(git rev-parse --absolute-git-dir)/hooks"; \
+	src_dir="$$(pwd)/.claude/hooks"; \
+	mkdir -p "$$hooks_dir"; \
+	git config core.hooksPath "$$hooks_dir"; \
+	for hook in pre-commit pre-push prepare-commit-msg; do \
+	  ln -sf "$$src_dir/$$hook" "$$hooks_dir/$$hook"; \
+	  echo "  $$hooks_dir/$$hook -> $$src_dir/$$hook"; \
+	done; \
+	echo "OK: hooks installed (core.hooksPath = $$hooks_dir)."

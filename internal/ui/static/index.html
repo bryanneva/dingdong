@@ -88,6 +88,13 @@
       aside#sidebar li.active {
         background: var(--selected-bg); color: var(--accent); font-weight: 600;
       }
+      aside#sidebar li:focus { outline: none; }
+      aside#sidebar li:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+        background: var(--hover-bg);
+      }
+      aside#sidebar li.active:focus-visible { background: var(--selected-bg); }
       aside#sidebar li .hash { color: var(--muted); }
       aside#sidebar li.active .hash { color: var(--accent); }
 

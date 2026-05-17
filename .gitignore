@@ -25,3 +25,6 @@ deploy/k8s/secret.yaml
 *.test
 *.out
 coverage.txt
+
+# JS test deps (vitest + happy-dom for internal/ui/static/app.js tests)
+/node_modules/

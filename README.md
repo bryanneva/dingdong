@@ -38,6 +38,18 @@ go run ./cmd/dingdong-cli tail --topic demo
 
 Open http://localhost:8080, paste the token, and you'll see a live feed.
 
+## Tests
+
+```sh
+make test                       # Go unit tests (matches CI's `go` job)
+go test -race ./...             # what CI actually runs
+npm install && npm test         # vitest + happy-dom UI tests for app.js
+```
+
+The JS suite covers the channel sidebar, SSE knock handling, and the
+auth-401 path in `internal/ui/static/app.js`. See `docs/js-tests.md` for
+the rationale and harness design.
+
 ## Knock shape
 
 ```json

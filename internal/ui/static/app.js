@@ -274,4 +274,27 @@
 
   if (!getToken()) promptForToken();
   else bootstrap();
+
+  // Test-only hook: exposes internals when a harness sets the flag before
+  // loading this script. Production pages never set it, so the global stays
+  // undefined and encapsulation is preserved.
+  if (typeof window !== "undefined" && window.__DINGDONG_TEST__) {
+    window.__dingdong = {
+      selectChannel,
+      ensureTopic,
+      fetchTopics,
+      connect,
+      bootstrap,
+      stopTopicsPoll,
+      state() {
+        return {
+          activeTopic,
+          topics: topics.slice(),
+          knocks: knocks.slice(),
+          hasPoll: topicsPollTimer !== null,
+          es,
+        };
+      },
+    };
+  }
 })();

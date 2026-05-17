@@ -18,6 +18,7 @@ internal/server/
   store.go                    Knock type, Filter, ring buffer + subscriber hub, NewID
   knocks.go                   POST/GET /v1/knocks
   stream.go                   GET /v1/stream (SSE: backlog → live)
+  webhooks.go                 POST/GET/DELETE /v1/webhooks + HMAC dispatch
   auth.go                     bearer middleware (header or ?token=)
 internal/ui/
   ui.go                       embed.FS for static assets
@@ -36,6 +37,11 @@ Dockerfile, Makefile          multi-stage build, distroless runtime
   `sqliteBackend` (production, persisted at `--db-path`) and `memBackend`
   (tests and local dev, ring-buffer of `--capacity` knocks). When
   `--db-path` is unset, the server falls back to mem.
+- Webhook subscribers (`POST /v1/webhooks`) live in memory on the server,
+  separate from knock history. The dispatcher fans matching knocks to
+  registered URLs with `X-Hub-Signature-256` HMAC headers (GitHub-style)
+  and bounded retry/backoff (1s/2s/4s, 4 attempts). A pod restart clears
+  registrations and in-flight retries — clients re-register on startup.
 - IDs are 28-char hex, lex-sortable by time. `since` filters use `id > since`.
 - Auth is one shared bearer token from `DINGDONG_TOKEN`. The UI accepts it via
   `?token=` (sessionStorage) since `EventSource` can't set custom headers.

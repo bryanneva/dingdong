@@ -90,6 +90,20 @@ Test helpers in `internal/server/helpers_test.go` (`newTestServer`,
 time-sorted, so prefer `"id001"`...`"id00N"` over arbitrary strings like
 `"sentinel"` (which lex-sorts after `"live1"` and breaks de-dup).
 
+## CI Exceptions
+
+The CI pipeline (`ci.yml`) runs four jobs — `go`, `lint`, `js`, `image` — but has no
+dedicated E2E or Coverage stages. This is intentional:
+
+- **E2E tests**: Not applicable. HTTP integration via `httptest.Server` already covers
+  the wire-format surface inside the unit-integration suite. No out-of-process E2E is
+  needed for a single-binary LAN service where the "system under test" is the same
+  binary that CI builds.
+- **Coverage**: Deferred. The service is sub-2000 LOC and `go test -race ./...`
+  exercises the critical paths via `httptest`. A separate coverage-gate step adds noise
+  without a clear threshold to enforce. Revisit if surface area grows or a regression
+  slips through that coverage would have caught.
+
 ## Deploy
 
 GitOps pipeline owned in this repo (`.github/workflows/release.yml`); cluster

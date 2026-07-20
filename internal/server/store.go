@@ -62,17 +62,25 @@ type subscription struct {
 // events in the same order they're persisted, and so a concurrent cancel()
 // cannot close a subscriber channel between snapshot and send.
 type Store struct {
-	mu       sync.Mutex
-	subs     map[*subscription]struct{}
-	backend  Backend
-	webhooks []Webhook
+	mu        sync.Mutex
+	subs      map[*subscription]struct{}
+	backend   Backend
+	webhooks  []Webhook
+	webhookDB WebhookBackend // non-nil when backend also implements WebhookBackend
 }
 
 func NewStore(backend Backend) *Store {
-	return &Store{
+	s := &Store{
 		subs:    make(map[*subscription]struct{}),
 		backend: backend,
 	}
+	if wb, ok := backend.(WebhookBackend); ok {
+		s.webhookDB = wb
+		if loaded, err := wb.LoadWebhooks(); err == nil {
+			s.webhooks = loaded
+		}
+	}
+	return s
 }
 
 // NewMemStore is a convenience constructor for tests and local development

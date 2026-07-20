@@ -20,11 +20,12 @@ type Config struct {
 }
 
 type Server struct {
-	cfg        Config
-	store      *Store
-	mux        *http.ServeMux
-	dispatcher *Dispatcher
-	deliveryWG sync.WaitGroup
+	cfg           Config
+	store         *Store
+	mux           *http.ServeMux
+	dispatcher    *Dispatcher
+	deliveryWG    sync.WaitGroup
+	deliveryQueue *DeliveryQueue // non-nil when using a WebhookBackend (SQLite mode)
 }
 
 func New(cfg Config) *Server {
@@ -40,13 +41,21 @@ func New(cfg Config) *Server {
 		mux:        http.NewServeMux(),
 		dispatcher: NewDispatcher(),
 	}
+	if s.store.webhookDB != nil {
+		s.deliveryQueue = NewDeliveryQueue(s.store.webhookDB, s.dispatcher)
+		s.deliveryQueue.Start()
+	}
 	s.routes()
 	return s
 }
 
-// Close releases the underlying store so the durable backend can flush and
-// any live SSE subscribers unblock.
+// Close stops the delivery queue (waits for in-flight dispatches), then
+// releases the underlying store so the durable backend can flush and any
+// live SSE subscribers unblock.
 func (s *Server) Close() error {
+	if s.deliveryQueue != nil {
+		s.deliveryQueue.Stop()
+	}
 	return s.store.Close()
 }
 

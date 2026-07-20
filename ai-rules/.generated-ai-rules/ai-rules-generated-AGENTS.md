@@ -111,15 +111,16 @@ On every push to `main`:
    plus `:main-<sha7>`.
 2. CI runs `yq` to set `images[0].newTag` in `k8s/kustomization.yaml` to
    `main-<sha7>` and opens a `chore(deploy): bump image to main-<sha7>` PR
-   from a `chore/deploy-bump-main-<sha7>` branch, then enables auto-merge
-   (squash + delete-branch). Once the required `go` and `image` checks pass
-   on the bump PR it merges itself.
+   from a `chore/deploy-bump-main-<sha7>` branch. Any previously open
+   `chore/deploy-bump-main-*` PRs are auto-closed as superseded. The bump PR
+   requires a **manual admin-merge** — required checks don't auto-trigger on
+   workflow-opened PRs due to GitHub anti-loop protection (see below).
 3. Your GitOps controller detects the source-repo change and applies the new
    manifests; the rollout uses `Recreate` (in-memory state can't tolerate
    two-pod overlap).
 
 The PR-based bump is required because `main` is branch-protected. Direct
-pushes by `GITHUB_TOKEN` are rejected; opening a PR and auto-merging is the
+pushes by `GITHUB_TOKEN` are rejected; opening a PR and admin-merging is the
 sanctioned path.
 
 The `[skip ci]` token in the bump commit message + the `paths-ignore` block
@@ -129,17 +130,11 @@ squash-merge from re-triggering Release. Don't hand-edit
 
 ### Deploy-bump prereqs (one-time, repo-level)
 
-The PR-based flow needs two repo-level settings the workflow cannot bootstrap
+The PR-based flow needs one repo-level secret the workflow cannot bootstrap
 itself:
 
-1. `allow_auto_merge` enabled on the repo:
-   ```sh
-   gh api -X PATCH repos/<owner>/<repo> -F allow_auto_merge=true
-   ```
-2. A `DEPLOY_BOT_TOKEN` repo secret holding a fine-scoped PAT with
-   `contents:write` and `pull-requests:write` on this repo. PRs created by
-   the default `GITHUB_TOKEN` would not trigger the required `go` / `image`
-   CI checks (GitHub's loop-prevention rule), so a PAT is required.
+- A `DEPLOY_BOT_TOKEN` repo secret holding a fine-scoped PAT with
+  `contents:write` and `pull-requests:write` on this repo.
 
 A `deploy` label is also expected; the workflow attaches it to every bump
 PR. Create it once with:
@@ -149,51 +144,36 @@ gh label create deploy --color 1d76db \
   --description "Auto-generated deploy-bump PR (release.yml)"
 ```
 
-### Known limitation: bump-PR CI may not auto-trigger
+### Bump PRs require manual admin-merge
 
-GitHub has anti-loop protection that suppresses `pull_request` events on
-PRs created from inside a workflow run, even when the workflow uses a
-fine-scoped PAT acting as a user. Symptoms: bump PR opens, auto-merge
-arms (`enabledBy: bryanneva`, `mergeMethod: SQUASH`), but `go` and
-`image` checks never register. Auto-merge sits forever.
+GitHub's anti-loop protection suppresses `pull_request` workflow events on
+PRs opened from inside a workflow run, even when the workflow uses a
+fine-scoped PAT. This means the required `go` and `image` CI checks never
+register on bump PRs, so auto-merge can't fire.
 
-The release.yml workflow attempts to work around this by pushing an
-empty `ci: retrigger after fresh-branch CI miss` commit immediately
-after `gh pr create`. Empirically this worked for the first bump PR
-in the repo (#26), but did NOT work for subsequent bump PRs (#27, #29)
-in the same hour — GitHub appears to deduplicate / rate-limit
-workflow-context `pull_request` events.
+**Expected flow**: a bump PR opens, and you admin-merge it once you've
+confirmed the image is good:
 
-**Workarounds when a bump PR sits stuck**:
+```sh
+gh pr merge <N> --admin --squash --delete-branch
+```
 
-1. **Push another empty commit from your own gh auth** (not the FGT) —
-   sometimes triggers CI:
-   ```sh
-   git fetch origin chore/deploy-bump-main-<sha>
-   git switch -c temp-bump origin/chore/deploy-bump-main-<sha>
-   git commit --allow-empty -m "ci: retrigger"
-   git push origin temp-bump:chore/deploy-bump-main-<sha>
-   git switch main && git branch -D temp-bump
-   ```
-2. **Admin-merge** if the diff is mechanically-generated (yq on
-   `kustomization.yaml`) and the image is already pushed to GHCR:
-   ```sh
-   gh pr merge <N> --admin --squash --delete-branch
-   ```
-   Safe because: (a) `enforce_admins: false` allows admin bypass,
-   (b) the bump diff is one line, (c) the image was verified by
-   the Release workflow's own `go vet/build/test` before opening
-   the PR.
-3. **Trigger a fresh Release run** via `gh workflow run release.yml
-   --ref main` if the bump PR is stale (main moved past it). This
-   builds a new image at the latest main SHA and opens a fresh
-   bump PR.
+Safe to admin-merge because: (a) `enforce_admins: false` allows admin
+bypass, (b) the bump diff is one mechanically-generated line in
+`kustomization.yaml`, (c) the image was verified by the Release workflow's
+own `go vet/build/test` before the PR was opened.
 
-A more durable fix would migrate from a PAT to a GitHub App
-installation token (App-created PRs reliably trigger workflows under
-a different identity model) or switch ci.yml from `pull_request` to
-`pull_request_target`. Both are larger changes; deferred until the
-admin-merge friction outgrows the alternative.
+**If a bump PR is stale** (main moved past it): trigger a fresh Release run,
+which builds a new image at the latest main SHA, auto-closes the stale PR,
+and opens a fresh bump PR:
+
+```sh
+gh workflow run release.yml --ref main
+```
+
+A more durable fix would migrate from a PAT to a GitHub App installation
+token (App-created PRs reliably trigger workflows under a different identity
+model). Deferred until the admin-merge friction outgrows the alternative.
 
 The example secret manifest (`k8s/dingdong-secret.yaml`) uses the 1Password
 operator, but you can swap it for any secret source that produces a

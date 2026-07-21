@@ -99,6 +99,33 @@ describe("app.js channel + SSE + auth behavior", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("renders the full date alongside the time for an incoming knock", async () => {
+    mockTopicsResponse(["main"]);
+    mockWebhooksResponse([]);
+    loadAppScript();
+    await waitForBootstrap();
+
+    const es = FakeEventSource.instances[0];
+    es.dispatch(
+      "knock",
+      JSON.stringify({
+        id: "k1",
+        from: "laptop:claude:demo",
+        topic: "main",
+        kind: "info",
+        subject: "Hello world",
+        ts: "2026-07-01T11:17:23Z",
+      }),
+    );
+
+    const tsEl = document.querySelector(".knock .ts");
+    expect(tsEl, ".ts element should be rendered").toBeTruthy();
+    // Must show the full sent date, not just the time, so an old message
+    // isn't mistaken for one sent today.
+    expect(tsEl.textContent).toContain("2026");
+    expect(tsEl.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
+  });
+
   it("/v1/topics returning 401 stops the poll and shows the auth overlay", async () => {
     // First call (bootstrap) succeeds so the poll starts.
     mockTopicsResponse(["main"]);

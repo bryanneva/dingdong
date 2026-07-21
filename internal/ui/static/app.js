@@ -58,11 +58,18 @@
     dot.title = title || (live ? "live" : "disconnected");
   }
 
+  const MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+
   function fmtTs(iso) {
     const d = new Date(iso);
     if (isNaN(d)) return iso;
     const pad = (n) => String(n).padStart(2, "0");
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    const date = `${MONTH_NAMES[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+    const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    return `${date} ${time}`;
   }
 
   function escapeHTML(s) {

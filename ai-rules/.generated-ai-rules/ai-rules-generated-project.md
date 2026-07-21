@@ -85,6 +85,20 @@ Test helpers in `internal/server/helpers_test.go` (`newTestServer`,
 time-sorted, so prefer `"id001"`...`"id00N"` over arbitrary strings like
 `"sentinel"` (which lex-sorts after `"live1"` and breaks de-dup).
 
+## CI Exceptions
+
+The CI pipeline (`ci.yml`) runs four jobs — `go`, `lint`, `js`, `image` — but has no
+dedicated E2E or Coverage stages. This is intentional:
+
+- **E2E tests**: Not applicable. HTTP integration via `httptest.Server` already covers
+  the wire-format surface inside the unit-integration suite. No out-of-process E2E is
+  needed for a single-binary LAN service where the "system under test" is the same
+  binary that CI builds.
+- **Coverage**: Deferred. The service is sub-2000 LOC and `go test -race ./...`
+  exercises the critical paths via `httptest`. A separate coverage-gate step adds noise
+  without a clear threshold to enforce. Revisit if surface area grows or a regression
+  slips through that coverage would have caught.
+
 ## Deploy
 
 GitOps pipeline owned in this repo (`.github/workflows/release.yml`); cluster
@@ -324,3 +338,26 @@ durable.
 
 Short list: per-agent identity, MCP server, ACLs, mobile push, threading UI.
 Add them only when the bare protocol clearly needs them.
+
+## Wrap-Up
+
+### Quality loop (ordered, repeats until review passes)
+1. /test-triage — when the issue has success criteria not yet auto-verified
+2. /desloppify — always (cleanup pass on changed code)
+3. /green-ci — after any push (GHA: `go`, `js`, `lint`, `image` jobs; `gh pr checks` is canonical)
+4. /slim-pr-review — always (merge gate)
+
+### Pre-merge ceremony (ordered, runs once)
+5. /sufficiency-audit — before validate-pr (acceptance-test coverage + UAT due/deferred decision)
+6. /validate-pr — always. For UI changes the proven pattern (PR #86): build the server from PR head, seed `-db-path` SQLite directly for historical fixtures (`ts` is server-assigned on POST), run with `DINGDONG_TOKEN` set, drive the UI via Playwright (auth overlay takes the token), screenshot to `docs/screenshots/pr-<N>/`.
+
+### Post-merge ceremony (ordered, runs once)
+7. /post-merge — release.yml builds the image and opens a deploy-bump PR; bump PRs need manual admin-merge (see release.yml header), then Flux rolls out
+8. /archive-artifacts — when thoughts/ralph/tasks have artifacts
+9. /follow-up-tasks — always
+10. /retro — always
+
+### Rules
+- /slim-pr-review is never skipped — it is the merge gate
+- /validate-pr always runs — repo is PUBLIC: no homelab hostnames/markers in commits, comments, or screenshots
+- runner-authored (`[claude-runner]`) PRs additionally get the review patterns in `~/.claude/topics/autonomous-pr-review.md`

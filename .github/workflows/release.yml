@@ -112,9 +112,24 @@ jobs:
             echo "Create a fine-scoped PAT (contents:write, pull-requests:write) and store it as DEPLOY_BOT_TOKEN." >&2
             exit 1
           fi
+          # Probe the repo once, keeping the call's exit status separate from
+          # the field value. An expired or revoked PAT 401s here; folding that
+          # into the allow_auto_merge check below reports an auth failure as a
+          # repo-settings problem, because --jq yields an empty string on a
+          # failed request and empty != "true". That misdirects the reader into
+          # PATCHing a setting that is already correct.
+          err_file="${RUNNER_TEMP:-/tmp}/gh-api-err.txt"
+          if ! repo_json=$(gh api "repos/${GITHUB_REPOSITORY}" 2>"$err_file"); then
+            echo "ERROR: DEPLOY_BOT_TOKEN was rejected by the GitHub API:" >&2
+            sed 's/^/  /' "$err_file" >&2
+            echo "The PAT is most likely expired or revoked. Mint a new fine-scoped" >&2
+            echo "PAT (contents:write, pull-requests:write) and update the secret:" >&2
+            echo "  gh secret set DEPLOY_BOT_TOKEN --repo ${GITHUB_REPOSITORY}" >&2
+            exit 1
+          fi
           # gh pr merge --auto silently no-ops if allow_auto_merge isn't on at
           # the repo level — fail loud here instead of letting bump-PRs sit.
-          if [ "$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.allow_auto_merge')" != "true" ]; then
+          if [ "$(jq -r '.allow_auto_merge' <<<"$repo_json")" != "true" ]; then
             echo "ERROR: allow_auto_merge is not enabled on this repo." >&2
             echo "Run: gh api -X PATCH repos/${GITHUB_REPOSITORY} -F allow_auto_merge=true" >&2
             exit 1

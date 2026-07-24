@@ -1,7 +1,11 @@
 package server
 
 import (
+	"database/sql"
+	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -273,6 +277,69 @@ func TestSQLiteBackend_CloseIsIdempotent(t *testing.T) {
 	// Second close must not panic and should return nil.
 	if err := b.Close(); err != nil {
 		t.Errorf("second close: %v", err)
+	}
+}
+
+// TestSQLiteBackend_ConcurrentSaveClose drives concurrent Save calls through a
+// b.Close() to prove two guarantees:
+//  1. No panic — db.Exec after db.Close returns an error, not a segfault.
+//     With SetMaxOpenConns(1) the pool serialises Save and Close, so this is a
+//     structural ordering race rather than a Go data race.
+//  2. Error shape contract — every non-nil Save error is either:
+//     - sql.ErrConnDone ("sql: connection is already closed"), or
+//     - "sql: database is closed" (db.Exec after db.Close, unexported sentinel)
+//     Anything outside this set indicates unexpected behaviour.
+//
+// Run under -race to catch any Go-level data race in addition to the above.
+func TestSQLiteBackend_ConcurrentSaveClose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+	b, err := newSQLiteBackend(path, 10000)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	const producers = 8
+	const itemsPerProducer = 100
+
+	errs := make(chan error, producers*itemsPerProducer)
+	var wg sync.WaitGroup
+
+	for p := 0; p < producers; p++ {
+		wg.Add(1)
+		go func(p int) {
+			defer wg.Done()
+			for i := 0; i < itemsPerProducer; i++ {
+				errs <- b.Save(Knock{
+					ID:    fmt.Sprintf("p%04d-%04d", p, i),
+					Topic: "concurrent",
+				})
+			}
+		}(p)
+	}
+
+	// Close mid-flight: goroutine startup is cheap, so Close likely arrives
+	// while at least some producer Saves are still in flight.
+	if err := b.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for saveErr := range errs {
+		if saveErr == nil {
+			continue // Save completed before Close — fine.
+		}
+		if errors.Is(saveErr, sql.ErrConnDone) {
+			continue // connection already closed — expected post-Close shape.
+		}
+		msg := saveErr.Error()
+		if strings.Contains(msg, "database is closed") ||
+			strings.Contains(msg, "connection is already closed") {
+			continue // expected post-Close error text from database/sql internals.
+		}
+		t.Errorf("unexpected Save error: %v", saveErr)
 	}
 }
 

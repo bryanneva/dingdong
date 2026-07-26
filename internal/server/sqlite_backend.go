@@ -39,6 +39,25 @@ CREATE TABLE IF NOT EXISTS knocks (
     in_reply_to TEXT NOT NULL DEFAULT ''
 ) STRICT;
 CREATE INDEX IF NOT EXISTS idx_knocks_topic_id ON knocks(topic, id);
+
+CREATE TABLE IF NOT EXISTS webhook_subscribers (
+    id            TEXT PRIMARY KEY,
+    url           TEXT NOT NULL,
+    topic         TEXT NOT NULL DEFAULT '',
+    secret        TEXT NOT NULL,
+    created_at_ns INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id            TEXT PRIMARY KEY,
+    subscriber_id TEXT NOT NULL,
+    knock_json    TEXT NOT NULL,
+    attempt       INTEGER NOT NULL DEFAULT 0,
+    next_at_ns    INTEGER NOT NULL,
+    last_status   INTEGER NOT NULL DEFAULT 0,
+    last_error    TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_deliveries_next_at ON webhook_deliveries(next_at_ns);
 `
 
 // trimInterval is the cadence at which the retention loop fires. Hourly is
@@ -215,4 +234,125 @@ func (b *sqliteBackend) Close() error {
 		err = b.db.Close()
 	})
 	return err
+}
+
+// --- WebhookBackend implementation ---------------------------------------
+
+func (b *sqliteBackend) SaveWebhook(w Webhook) error {
+	_, err := b.db.Exec(
+		`INSERT INTO webhook_subscribers (id, url, topic, secret, created_at_ns) VALUES (?, ?, ?, ?, ?)`,
+		w.ID, w.URL, w.Topic, w.Secret, w.CreatedAt.UnixNano(),
+	)
+	if err != nil {
+		return fmt.Errorf("save webhook: %w", err)
+	}
+	return nil
+}
+
+func (b *sqliteBackend) LoadWebhooks() ([]Webhook, error) {
+	rows, err := b.db.Query(
+		`SELECT id, url, topic, secret, created_at_ns FROM webhook_subscribers ORDER BY created_at_ns ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load webhooks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Webhook
+	for rows.Next() {
+		var w Webhook
+		var tsNs int64
+		if err := rows.Scan(&w.ID, &w.URL, &w.Topic, &w.Secret, &tsNs); err != nil {
+			return nil, fmt.Errorf("load webhooks scan: %w", err)
+		}
+		w.CreatedAt = time.Unix(0, tsNs).UTC()
+		out = append(out, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load webhooks rows: %w", err)
+	}
+	return out, nil
+}
+
+func (b *sqliteBackend) RemoveWebhook(id string) error {
+	_, err := b.db.Exec(`DELETE FROM webhook_subscribers WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("remove webhook: %w", err)
+	}
+	return nil
+}
+
+func (b *sqliteBackend) EnqueueDelivery(d PendingDelivery) error {
+	_, err := b.db.Exec(
+		`INSERT INTO webhook_deliveries (id, subscriber_id, knock_json, attempt, next_at_ns, last_status, last_error)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.Subscriber.ID, d.KnockJSON, d.Attempt, d.NextAt.UnixNano(), d.LastStatus, d.LastError,
+	)
+	if err != nil {
+		return fmt.Errorf("enqueue delivery: %w", err)
+	}
+	return nil
+}
+
+func (b *sqliteBackend) FetchDueDeliveries(now time.Time, limit int) ([]PendingDelivery, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := b.db.Query(`
+		SELECT d.id, d.knock_json, d.attempt, d.next_at_ns, d.last_status, d.last_error,
+		       s.id, s.url, s.topic, s.secret, s.created_at_ns
+		FROM webhook_deliveries d
+		INNER JOIN webhook_subscribers s ON d.subscriber_id = s.id
+		WHERE d.next_at_ns <= ?
+		LIMIT ?`,
+		now.UnixNano(), limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("fetch due deliveries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []PendingDelivery
+	for rows.Next() {
+		var d PendingDelivery
+		var nextNs, subCreatedNs int64
+		if err := rows.Scan(
+			&d.ID, &d.KnockJSON, &d.Attempt, &nextNs, &d.LastStatus, &d.LastError,
+			&d.Subscriber.ID, &d.Subscriber.URL, &d.Subscriber.Topic, &d.Subscriber.Secret, &subCreatedNs,
+		); err != nil {
+			return nil, fmt.Errorf("fetch due deliveries scan: %w", err)
+		}
+		d.NextAt = time.Unix(0, nextNs).UTC()
+		d.Subscriber.CreatedAt = time.Unix(0, subCreatedNs).UTC()
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("fetch due deliveries rows: %w", err)
+	}
+	return out, nil
+}
+
+func (b *sqliteBackend) UpdateDelivery(id string, attempt int, nextAt time.Time, status int, errMsg string) error {
+	_, err := b.db.Exec(
+		`UPDATE webhook_deliveries SET attempt = ?, next_at_ns = ?, last_status = ?, last_error = ? WHERE id = ?`,
+		attempt, nextAt.UnixNano(), status, errMsg, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update delivery: %w", err)
+	}
+	return nil
+}
+
+func (b *sqliteBackend) DeleteDelivery(id string) error {
+	_, err := b.db.Exec(`DELETE FROM webhook_deliveries WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete delivery: %w", err)
+	}
+	return nil
+}
+
+func (b *sqliteBackend) CancelDeliveriesForWebhook(subscriberID string) error {
+	_, err := b.db.Exec(`DELETE FROM webhook_deliveries WHERE subscriber_id = ?`, subscriberID)
+	if err != nil {
+		return fmt.Errorf("cancel deliveries: %w", err)
+	}
+	return nil
 }

@@ -42,6 +42,9 @@ func (s *Store) AddWebhook(w Webhook) Webhook {
 	w.ID = NewID()
 	w.CreatedAt = time.Now().UTC()
 	s.webhooks = append(s.webhooks, w)
+	if s.webhookDB != nil {
+		_ = s.webhookDB.SaveWebhook(w)
+	}
 	return w
 }
 
@@ -59,12 +62,18 @@ func (s *Store) ListWebhooks() []Webhook {
 }
 
 // DeleteWebhook removes the webhook by id. Returns true if found.
+// When using the SQLite backend, also cancels any pending deliveries for this
+// subscriber and removes the subscriber record from the DB.
 func (s *Store) DeleteWebhook(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, w := range s.webhooks {
 		if w.ID == id {
 			s.webhooks = append(s.webhooks[:i], s.webhooks[i+1:]...)
+			if s.webhookDB != nil {
+				_ = s.webhookDB.CancelDeliveriesForWebhook(id)
+				_ = s.webhookDB.RemoveWebhook(id)
+			}
 			return true
 		}
 	}
@@ -248,19 +257,24 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// fanOutWebhooks finds matching subscribers and dispatches the knock to each
-// in its own goroutine. Non-blocking from the caller's perspective —
-// retries and backoff happen out-of-band.
-//
-// Tests that need to wait for completion can call Server.WaitForDeliveries.
+// fanOutWebhooks finds matching subscribers and dispatches the knock to each.
+// In SQLite mode (deliveryQueue non-nil), deliveries are persisted to the DB
+// and dispatched by the background poll loop — surviving pod restarts.
+// In mem mode (tests/local dev), each delivery runs on its own goroutine and
+// is tracked by deliveryWG so WaitForDeliveries works.
 func (s *Server) fanOutWebhooks(k Knock) {
 	subs := s.store.MatchingWebhooks(k.Topic)
 	for _, sub := range subs {
-		s.deliveryWG.Add(1)
-		go func(target Webhook) {
-			defer s.deliveryWG.Done()
-			s.dispatcher.Deliver(target, k)
-		}(sub)
+		sub := sub
+		if s.deliveryQueue != nil {
+			_ = s.deliveryQueue.Enqueue(sub, k)
+		} else {
+			s.deliveryWG.Add(1)
+			go func(target Webhook) {
+				defer s.deliveryWG.Done()
+				s.dispatcher.Deliver(target, k)
+			}(sub)
+		}
 	}
 }
 

@@ -200,23 +200,32 @@ total. Retry is triggered on transport errors, HTTP 5xx, and HTTP 429.
 Other 4xx statuses (400-499 except 429) are treated as subscriber config
 bugs and not retried — the delivery is dropped.
 
-### MVP caveats
+### Persistence and retry durability
 
-- **No persistence.** Webhook subscribers live in memory on the server
-  (separate from the SQLite-backed knock history). A pod restart clears all
-  registrations; clients must re-register on startup, and any retries in
-  flight at the time of restart are lost.
-- **No dead-letter / inspection.** A failed delivery is logged (eventually
-  — currently just dropped). There is no API to list failed deliveries.
+When the server runs with `--db-path` (SQLite mode), webhook subscribers and
+the retry queue are fully durable:
+
+- Subscriber registrations survive pod restarts — no client re-registration
+  needed.
+- In-flight retries are written to the `webhook_deliveries` table before the
+  delivery goroutine exits. On the next startup, the background delivery
+  worker picks them up at the next scheduled backoff slot.
+- Deleting a subscriber (`DELETE /v1/webhooks/{id}`) immediately cancels all
+  queued retries for that subscriber in the DB — no zombie dispatches.
+
+When running without `--db-path` (in-memory mode, the default for local dev
+and tests), the existing behaviour applies: subscribers and in-flight retries
+live in memory and are lost on restart.
+
+### Remaining caveats
+
+- **No dead-letter / inspection.** A failed delivery is silently dropped after
+  all retry attempts. There is no API to list failed deliveries.
 - **No per-subscriber concurrency limit.** A slow subscriber will not block
-  others — each delivery runs on its own goroutine — but a very large
-  number of failing subscribers can stack up goroutines until backoff
-  clears.
-- **Single-replica only.** The fan-out is in-process; running multiple
-  replicas would deliver each knock once per replica.
-
-Persistence + retry queue are tracked under [#53](https://github.com/bryanneva/dingdong/issues/53);
-when that lands, restart semantics get cleaned up alongside it.
+  others, but a very large number of failing subscribers can accumulate pending
+  rows in `webhook_deliveries` until backoff clears.
+- **Single-replica only.** The fan-out is in-process; running multiple replicas
+  would deliver each knock once per replica.
 
 ## Deploy
 
